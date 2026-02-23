@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+
+# Database files
+*.db
+data/
+
+# Generated output
+output/
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+
+# Python
+*.egg-info/
+dist/
+build/
+.env
