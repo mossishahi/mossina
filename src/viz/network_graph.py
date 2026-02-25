@@ -389,17 +389,56 @@ _TEMPLATE = r"""<!DOCTYPE html>
     background: rgba(22,27,34,0.94); border: 1px solid #30363d;
     border-radius: 10px; padding: 10px 12px; backdrop-filter: blur(10px);
   }
-  #tf-box h4 { font-size: 12px; color: #58a6ff; margin-bottom: 6px; }
-  #tf-box label { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #8b949e; cursor: pointer; }
-  #tf-box input[type="checkbox"] { accent-color: #1f6feb; }
-  #tf-dates { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
-  #tf-dates span { font-size: 10px; color: #6e7681; }
-  #tf-dates input[type="date"] {
-    padding: 3px 5px; font-size: 11px; background: #161b22; border: 1px solid #30363d;
-    border-radius: 4px; color: #c9d1d9; outline: none;
+  #tf-box h4 { font-size: 12px; color: #58a6ff; margin-bottom: 8px; }
+  #tf-row {
+    display: flex; gap: 5px; align-items: flex-end;
   }
-  #tf-dates input[type="date"]:focus { border-color: #58a6ff; }
-  #tf-status { font-size: 10px; color: #8b949e; margin-top: 5px; }
+  .tf-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .tf-field label {
+    font-size: 9px; font-weight: 600; color: #8b949e;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .tf-input-wrap {
+    position: relative; cursor: pointer;
+  }
+  .tf-input-wrap input[type="date"] {
+    width: 100%; padding: 7px 8px; font-size: 12px;
+    background: #0d1117; border: 1px solid #30363d;
+    border-radius: 6px; color: #c9d1d9; outline: none;
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    -webkit-appearance: none;
+  }
+  .tf-input-wrap input[type="date"]:focus {
+    border-color: #58a6ff;
+    box-shadow: 0 0 0 2px rgba(88,166,255,0.15);
+  }
+  .tf-input-wrap input[type="date"]::-webkit-calendar-picker-indicator {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; cursor: pointer;
+  }
+  .tf-input-wrap::after {
+    content: "\1F4C5"; position: absolute; right: 8px; top: 50%;
+    transform: translateY(-50%); font-size: 13px;
+    pointer-events: none; opacity: 0.45;
+  }
+  #tf-search-btn {
+    padding: 7px 12px; font-size: 11px; font-weight: 600;
+    border-radius: 6px; cursor: pointer; white-space: nowrap;
+    border: 1px solid #238636; background: #238636; color: #fff;
+    transition: background 0.15s;
+    align-self: flex-end;
+  }
+  #tf-search-btn:hover { background: #2ea043; }
+  #tf-clear-btn {
+    padding: 7px 8px; font-size: 11px;
+    border-radius: 6px; cursor: pointer; white-space: nowrap;
+    border: 1px solid #30363d; background: transparent; color: #8b949e;
+    transition: color 0.15s;
+    align-self: flex-end;
+  }
+  #tf-clear-btn:hover { color: #c9d1d9; }
+  #tf-status { font-size: 10px; color: #8b949e; margin-top: 6px; line-height: 1.4; }
 
   #pf-box {
     background: rgba(22,27,34,0.94); border: 1px solid #30363d;
@@ -624,15 +663,17 @@ _TEMPLATE = r"""<!DOCTYPE html>
   </div>
   <div id="tf-box">
     <h4>Time Frame</h4>
-    <label>
-      <input type="checkbox" id="tf-enabled">
-      Filter by flight availability
-    </label>
-    <div id="tf-dates">
-      <span>From</span>
-      <input type="date" id="tf-start">
-      <span>To</span>
-      <input type="date" id="tf-end">
+    <div id="tf-row">
+      <div class="tf-field">
+        <label for="tf-start">From</label>
+        <div class="tf-input-wrap"><input type="date" id="tf-start"></div>
+      </div>
+      <div class="tf-field">
+        <label for="tf-end">To</label>
+        <div class="tf-input-wrap"><input type="date" id="tf-end"></div>
+      </div>
+      <button id="tf-search-btn">Search</button>
+      <button id="tf-clear-btn">Clear</button>
     </div>
     <div id="tf-status"></div>
   </div>
@@ -888,8 +929,8 @@ function nextAvailDate(fromIata, toIata) {
 function buildAirlineUrl(airline, fromIata, toIata, dateStr) {
   if (!dateStr) dateStr = nextAvailDate(fromIata, toIata);
   if (airline === "W6") {
-    return "https://www.wizzair.com/en-GB/booking/select-flight/" +
-      fromIata + "/" + toIata + "/" + dateStr + "//1/";
+    return "https://wizzair.com/en-gb/booking/select-flight/" +
+      fromIata + "/" + toIata + "/" + dateStr + "/null/1/0/0/0/null";
   }
   return "https://www.ryanair.com/gb/en/trip/flights/select" +
     "?adults=1&teens=0&children=0&infants=0" +
@@ -1294,37 +1335,57 @@ document.getElementById("intersect-cb").addEventListener("change", function() {
 });
 
 /* ---- Time frame filter ---- */
+function tfWeekLater(dateStr) {
+  var d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + 7);
+  return d.toISOString().slice(0, 10);
+}
+
 (function() {
+  var today = new Date().toISOString().slice(0, 10);
+  document.getElementById("tf-start").value = today;
+  document.getElementById("tf-end").value = tfWeekLater(today);
+
   var dates = Object.values(availData).flat();
   if (dates.length) {
     dates.sort();
-    document.getElementById("tf-start").value = dates[0];
-    document.getElementById("tf-end").value = dates[dates.length - 1];
     document.getElementById("tf-status").textContent =
-      "Availability: " + dates[0] + " to " + dates[dates.length - 1] +
+      "Data available: " + dates[0] + " to " + dates[dates.length - 1] +
       " (" + Object.keys(availData).length + " routes)";
   } else {
-    document.getElementById("tf-status").textContent = "No availability data. Run: python scrape.py --fares-only";
+    document.getElementById("tf-status").textContent = "No availability data.";
   }
 })();
 
-function applyTimeFrame() {
-  var cb = document.getElementById("tf-enabled");
-  tfEnabled = cb.checked;
-  if (!tfEnabled) {
-    tfActiveEdges = null;
-    document.getElementById("tf-status").style.color = "#8b949e";
-    if (pfActive) clearPathfinder();
-    refreshArcs();
-    syncUI();
-    return;
+document.getElementById("tf-start").addEventListener("change", function() {
+  var endEl = document.getElementById("tf-end");
+  var newEnd = tfWeekLater(this.value);
+  if (!endEl.value || endEl.value < this.value) {
+    endEl.value = newEnd;
   }
+});
+
+document.querySelectorAll(".tf-input-wrap").forEach(function(wrap) {
+  wrap.addEventListener("click", function() {
+    var inp = this.querySelector("input");
+    if (inp && inp.showPicker) { try { inp.showPicker(); } catch(e) {} }
+  });
+});
+
+function applyTimeFrame() {
   var start = document.getElementById("tf-start").value;
   var end = document.getElementById("tf-end").value;
   if (!start || !end) {
     document.getElementById("tf-status").textContent = "Set both start and end dates";
+    document.getElementById("tf-status").style.color = "#f85149";
     return;
   }
+  if (start > end) {
+    document.getElementById("tf-status").textContent = "Start date must be before end date";
+    document.getElementById("tf-status").style.color = "#f85149";
+    return;
+  }
+  tfEnabled = true;
   var activeRoutes = new Set();
   Object.keys(availData).forEach(function(routeKey) {
     var days = availData[routeKey];
@@ -1337,20 +1398,36 @@ function applyTimeFrame() {
   });
   tfActiveEdges = activeRoutes;
   document.getElementById("tf-status").textContent =
-    activeRoutes.size + " routes with flights in " + start + " to " + end;
+    activeRoutes.size + " routes with flights between " + start + " and " + end;
   document.getElementById("tf-status").style.color = "#3fb950";
   if (pfActive) clearPathfinder();
   refreshArcs();
   syncUI();
 }
 
-document.getElementById("tf-enabled").addEventListener("change", applyTimeFrame);
-document.getElementById("tf-start").addEventListener("change", function() {
-  if (tfEnabled) applyTimeFrame();
-});
-document.getElementById("tf-end").addEventListener("change", function() {
-  if (tfEnabled) applyTimeFrame();
-});
+function clearTimeFrame() {
+  tfEnabled = false;
+  tfActiveEdges = null;
+  var today = new Date().toISOString().slice(0, 10);
+  document.getElementById("tf-start").value = today;
+  document.getElementById("tf-end").value = tfWeekLater(today);
+  var dates = Object.values(availData).flat();
+  if (dates.length) {
+    dates.sort();
+    document.getElementById("tf-status").textContent =
+      "Data available: " + dates[0] + " to " + dates[dates.length - 1] +
+      " (" + Object.keys(availData).length + " routes)";
+  } else {
+    document.getElementById("tf-status").textContent = "";
+  }
+  document.getElementById("tf-status").style.color = "#8b949e";
+  if (pfActive) clearPathfinder();
+  refreshArcs();
+  syncUI();
+}
+
+document.getElementById("tf-search-btn").addEventListener("click", applyTimeFrame);
+document.getElementById("tf-clear-btn").addEventListener("click", clearTimeFrame);
 
 /* ---- Sync UI ---- */
 function syncUI() {
