@@ -322,6 +322,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .sug:hover { background: #21262d; }
   .sug:last-child { border-bottom: none; }
   .sug b { color: #58a6ff; }
+  .sug-country { background: rgba(88,166,255,0.06); }
+  .sug-country .sug-icon { margin-right: 4px; font-size: 12px; }
   #btn-row { display: flex; gap: 4px; margin: 6px 0 4px; }
   .btn {
     padding: 3px 8px; font-size: 10px; border-radius: 4px; cursor: pointer;
@@ -2091,15 +2093,43 @@ var suggestionsEl = document.getElementById("suggestions");
 searchBox.addEventListener("input", function() {
   var q = this.value.trim().toLowerCase();
   if (!q) { suggestionsEl.style.display = "none"; return; }
-  var hits = nodesData.filter(function(n) {
+  suggestionsEl.innerHTML = "";
+
+  var countryHits = Object.keys(countryGroups).filter(function(cc) {
+    var name = (countryNames[cc] || "").toLowerCase();
+    return name.indexOf(q) !== -1 || cc.indexOf(q) !== -1;
+  });
+  countryHits.forEach(function(cc) {
+    var visCities = (countryGroups[cc] || []).filter(function(c) { return isNodeVisible(c.id); });
+    if (!visCities.length) return;
+    var el = document.createElement("div");
+    el.className = "sug sug-country";
+    el.innerHTML = '<span class="sug-icon">\uD83C\uDDEA\uD83C\uDDFA</span><b>' +
+      (countryNames[cc] || cc.toUpperCase()) + '</b>' +
+      ' <span style="color:#484f58">' + visCities.length + " cities</span>";
+    el.onmousedown = function(ev) { ev.preventDefault(); };
+    el.onclick = function() {
+      visCities.forEach(function(c) { activeCities.add(c.id); });
+      refreshArcs();
+      syncUI();
+      suggestionsEl.style.display = "none";
+      searchBox.value = "";
+      var g = document.querySelector('.cg[data-cc="' + cc + '"]');
+      if (g) {
+        setTimeout(function() {
+          g.scrollIntoView({behavior: "smooth", block: "start"});
+        }, 80);
+      }
+    };
+    suggestionsEl.appendChild(el);
+  });
+
+  var cityHits = nodesData.filter(function(n) {
     return n.id.toLowerCase().indexOf(q) !== -1 ||
            (n.name || "").toLowerCase().indexOf(q) !== -1 ||
-           (n.city || "").toLowerCase().indexOf(q) !== -1 ||
-           (n.country_name || "").toLowerCase().indexOf(q) !== -1;
+           (n.city || "").toLowerCase().indexOf(q) !== -1;
   }).slice(0, 8);
-  if (!hits.length) { suggestionsEl.style.display = "none"; return; }
-  suggestionsEl.innerHTML = "";
-  hits.forEach(function(n) {
+  cityHits.forEach(function(n) {
     var el = document.createElement("div");
     el.className = "sug";
     el.innerHTML = "<b>" + n.id + "</b> " + (n.city || n.name) +
@@ -2109,8 +2139,6 @@ searchBox.addEventListener("input", function() {
       if (!activeCities.has(n.id)) activeCities.add(n.id);
       refreshArcs();
       syncUI();
-      var g = document.querySelector('.cg[data-cc="' + n.country + '"]');
-      if (g) g.classList.add("open");
       myGlobe.pointOfView({ lat: n.lat, lng: n.lon, altitude: 1.8 }, 800);
       suggestionsEl.style.display = "none";
       searchBox.value = "";
@@ -2125,7 +2153,12 @@ searchBox.addEventListener("input", function() {
     };
     suggestionsEl.appendChild(el);
   });
-  suggestionsEl.style.display = "block";
+
+  if (suggestionsEl.children.length === 0) {
+    suggestionsEl.style.display = "none";
+  } else {
+    suggestionsEl.style.display = "block";
+  }
 });
 
 searchBox.addEventListener("blur", function() {
