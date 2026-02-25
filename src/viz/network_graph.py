@@ -11,7 +11,30 @@ import math
 import sqlite3
 from pathlib import Path
 
+import requests
+
 log = logging.getLogger("scraper")
+
+_EUR_RATE_URL = "https://open.er-api.com/v6/latest/EUR"
+
+
+def _fetch_eur_rates(currencies):
+    """Return a list of rates (units-per-1-EUR) aligned with the currencies list."""
+    rates = [1.0] * len(currencies)
+    try:
+        resp = requests.get(_EUR_RATE_URL, timeout=10)
+        resp.raise_for_status()
+        api_rates = resp.json().get("rates", {})
+        for i, cur in enumerate(currencies):
+            if cur in api_rates:
+                rates[i] = round(api_rates[cur], 6)
+            else:
+                log.warning("No EUR rate for %s, prices will show as-is", cur)
+        log.info("Fetched EUR exchange rates for %d currencies", len(currencies))
+    except Exception as exc:
+        log.warning("Could not fetch exchange rates: %s -- prices will show as-is", exc)
+    return rates
+
 
 COUNTRY_PALETTE = [
     "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
@@ -131,7 +154,9 @@ def _load_graph_data(conn):
             p = int(p)
         fares[key].append([offset, p, cur_idx[currency], airline])
 
-    fare_data = {"_c": currencies}
+    eur_rates = _fetch_eur_rates(currencies)
+
+    fare_data = {"_c": currencies, "_r": eur_rates}
     fare_data.update(fares)
 
     return airports, routes, degree, avail, route_airlines, fare_data
@@ -720,15 +745,19 @@ var airlineMeta = __AIRLINE_META__;
 var _rawFares = __FARE_DATA__;
 
 var fareCurrencies = _rawFares._c || [];
+var fareEurRates = _rawFares._r || [];
 var fareByRoute = {};
 (function() {
   var BASE = Date.UTC(2026, 0, 1);
   Object.keys(_rawFares).forEach(function(rk) {
-    if (rk === "_c") return;
+    if (rk === "_c" || rk === "_r") return;
     fareByRoute[rk] = _rawFares[rk].map(function(e) {
       var d = new Date(BASE + e[0] * 86400000);
       var ds = d.toISOString().slice(0, 10);
-      return {date: ds, price: e[1], currency: fareCurrencies[e[2]], airline: e[3]};
+      var cur = fareCurrencies[e[2]];
+      var rate = fareEurRates[e[2]] || 1;
+      var eur = e[1] / rate;
+      return {date: ds, price: e[1], currency: cur, airline: e[3], eur: Math.round(eur * 100) / 100};
     });
   });
   _rawFares = null;
@@ -1003,10 +1032,17 @@ function showArcPopup(arc) {
       var dayName = dd.toLocaleDateString("en-GB", {weekday: "short"});
       var dateLabel = dd.toLocaleDateString("en-GB", {day: "numeric", month: "short", year: "numeric"});
       var priceColor = meta.color;
+      var priceStr;
+      if (f.currency === "EUR") {
+        priceStr = f.price.toFixed(2) + " \u20AC";
+      } else {
+        priceStr = f.eur.toFixed(2) + " \u20AC" +
+          ' <span style="color:#8b949e;font-size:10px">(' +
+          Math.round(f.price) + " " + f.currency + ")</span>";
+      }
       row.innerHTML = '<span class="ap-day">' + dayName + '</span>' +
         '<span class="ap-date">' + dateLabel + '</span>' +
-        '<span class="ap-price" style="color:' + priceColor + '">' +
-          f.price.toFixed(2) + ' ' + f.currency + '</span>' +
+        '<span class="ap-price" style="color:' + priceColor + '">' + priceStr + '</span>' +
         '<span class="ap-go">\u2192 Book</span>';
       row.addEventListener("click", function() {
         window.open(buildAirlineUrl(al, from, to, f.date), "_blank");
