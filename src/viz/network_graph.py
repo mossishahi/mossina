@@ -385,6 +385,8 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .ct-row.hl { background: rgba(255,180,0,0.15); }
   .ct-row.hl .ct-iata { color: #ffb800; }
   .ct-row.hl .ct-name { color: #e3b341; }
+  @keyframes flash-row { 0%,100% { background: transparent; } 40% { background: rgba(88,166,255,0.25); } }
+  .ct-row.flash { animation: flash-row 0.6s ease 2; }
   .node-label {
     display: none; position: absolute; left: calc(100% + 4px); top: 50%;
     transform: translateY(-50%); white-space: nowrap;
@@ -1466,6 +1468,32 @@ document.getElementById("tf-search-btn").addEventListener("click", applyTimeFram
 document.getElementById("tf-clear-btn").addEventListener("click", clearTimeFrame);
 
 /* ---- Sync UI ---- */
+function reorderCountries() {
+  var tree = document.getElementById("tree");
+  var groups = Array.from(tree.querySelectorAll(".cg"));
+  groups.sort(function(a, b) {
+    var ccA = a.dataset.cc, ccB = b.dataset.cc;
+    var citiesA = countryGroups[ccA] || [], citiesB = countryGroups[ccB] || [];
+    var selA = 0, selB = 0;
+    citiesA.forEach(function(c) { if (activeCities.has(c.id)) selA++; });
+    citiesB.forEach(function(c) { if (activeCities.has(c.id)) selB++; });
+    var hasA = selA > 0 ? 0 : 1;
+    var hasB = selB > 0 ? 0 : 1;
+    if (hasA !== hasB) return hasA - hasB;
+    var nameA = (countryNames[ccA] || ccA).toLowerCase();
+    var nameB = (countryNames[ccB] || ccB).toLowerCase();
+    return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
+  });
+  groups.forEach(function(g) {
+    tree.appendChild(g);
+    var cc = g.dataset.cc;
+    var cities = countryGroups[cc] || [];
+    var hasSel = cities.some(function(c) { return activeCities.has(c.id); });
+    if (hasSel) g.classList.add("open");
+    else g.classList.remove("open");
+  });
+}
+
 function syncUI() {
   document.querySelectorAll(".ct-row input[type='checkbox']").forEach(function(cb) {
     cb.checked = activeCities.has(cb.dataset.id);
@@ -1487,6 +1515,8 @@ function syncUI() {
   var sacb = document.getElementById("select-all-cb");
   sacb.checked = totalSelected === totalVisible && totalVisible > 0;
   sacb.indeterminate = totalSelected > 0 && totalSelected < totalVisible;
+
+  reorderCountries();
 
   Object.keys(nodeEls).forEach(function(id) {
     nodeEls[id].style.boxShadow = activeCities.has(id)
@@ -2084,6 +2114,14 @@ searchBox.addEventListener("input", function() {
       myGlobe.pointOfView({ lat: n.lat, lng: n.lon, altitude: 1.8 }, 800);
       suggestionsEl.style.display = "none";
       searchBox.value = "";
+      var row = cityRows[n.id];
+      if (row) {
+        setTimeout(function() {
+          row.scrollIntoView({behavior: "smooth", block: "center"});
+          row.classList.add("flash");
+          setTimeout(function() { row.classList.remove("flash"); }, 1200);
+        }, 80);
+      }
     };
     suggestionsEl.appendChild(el);
   });
