@@ -307,9 +307,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   #tree-wrap {
     padding: 6px 12px 0;
     border-top: 1px solid #30363d; margin-top: 4px;
-    max-height: 320px; overflow: hidden;
+    max-height: 320px; overflow-y: auto;
   }
-  #tree-wrap.expanded { max-height: none; overflow: visible; }
+  #tree-wrap.expanded { max-height: none; overflow-y: auto; }
   #tree-toggle {
     display: block; width: 100%; padding: 5px 0;
     text-align: center; font-size: 10px; color: #58a6ff;
