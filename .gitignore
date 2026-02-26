@@ -8,7 +8,8 @@ __pycache__/
 data/
 
 # Generated output
-output/
+output/*
+!output/route_network.html
 
 # IDE
 .vscode/
