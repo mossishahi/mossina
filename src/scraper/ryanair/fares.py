@@ -33,10 +33,10 @@ def scrape_fares(conn, airports, limit=None):
             "language": "en",
             "market": "en-gb",
             "offset": 0,
-            "limit": 20,
+            "limit": 200,
             "outboundDepartureDateFrom": date_from,
             "outboundDepartureDateTo": date_to,
-            "priceValueTo": 200,
+            "priceValueTo": 1000,
         }
         data = api_get(FARES_URL, params=params)
         if not data or not data.get("fares"):
