@@ -1,12 +1,27 @@
 """Shared configuration: paths, constants, logging setup."""
 
 import logging
+import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
-DB_PATH = DATA_DIR / "flights.db"
-OUTPUT_DIR = PROJECT_ROOT / "output"
+
+# Where scraped data / database live.
+# By default this is the local "data" directory inside the repo, but it can be
+# overridden so that a pre-populated data folder can live anywhere on disk.
+#
+# Env vars:
+# - MOSSINA_DATA_DIR  -> directory containing flights.db and other data files
+# - MOSSINA_DB_PATH   -> full path to flights.db (overrides MOSSINA_DATA_DIR)
+# - MOSSINA_OUTPUT_DIR -> directory where visualisations are written
+_default_data_dir = PROJECT_ROOT / "data"
+DATA_DIR = Path(os.getenv("MOSSINA_DATA_DIR", _default_data_dir))
+
+_default_db_path = DATA_DIR / "flights.db"
+DB_PATH = Path(os.getenv("MOSSINA_DB_PATH", _default_db_path))
+
+_default_output_dir = PROJECT_ROOT / "output"
+OUTPUT_DIR = Path(os.getenv("MOSSINA_OUTPUT_DIR", _default_output_dir))
 
 REQUEST_DELAY = 1.5
 MAX_RETRIES = 3

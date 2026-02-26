@@ -2281,3 +2281,18 @@ document.getElementById("select-all-cb").addEventListener("change", function() {
 </body>
 </html>
 """
+
+
+if __name__ == "__main__":
+    from src.config import OUTPUT_DIR, setup_logging
+    from src.db import connect
+
+    logger = setup_logging()
+    conn = connect()
+    try:
+        out_path = OUTPUT_DIR / "route_network.html"
+        build_network_html(conn, out_path)
+        logger.info("Route network HTML written to %s", out_path)
+        print(out_path)
+    finally:
+        conn.close()
