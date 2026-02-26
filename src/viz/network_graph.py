@@ -132,7 +132,7 @@ def _load_graph_data(conn):
         """SELECT origin, destination, substr(departure_date, 1, 10),
                   MIN(price), currency, airline
            FROM fares
-           WHERE departure_date >= date('now')
+           WHERE departure_date >= date('now') AND price > 0
            GROUP BY origin, destination, substr(departure_date, 1, 10)
            ORDER BY origin, destination, departure_date"""
     ):
@@ -569,6 +569,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
     font-size: 10px; color: #8b949e; padding: 3px 6px 3px 14px; cursor: pointer;
     border-radius: 3px;
   }
+  .pf-row-cost {
+    font-size: 10px; font-weight: 700; color: #3fb950; min-width: 38px;
+    text-align: right; flex-shrink: 0;
+  }
   .pf-row-lbl {
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;
   }
@@ -988,7 +992,7 @@ function showArcPopup(arc) {
 
   var flights = fareByRoute[from + "-" + to] || [];
   var today = new Date().toISOString().slice(0, 10);
-  flights = flights.filter(function(f) { return f.date >= today; });
+  flights = flights.filter(function(f) { return f.date >= today && f.price > 0; });
 
   if (tfEnabled && tfActiveEdges) {
     var start = document.getElementById("tf-start").value;
@@ -1581,11 +1585,21 @@ function runPathfinder() {
   var pfAdj = {};
   edgesData.forEach(function(e) {
     if (!isEdgeVisible(e)) return;
-    if (tfEnabled && tfActiveEdges && !tfActiveEdges.has(e.from + "-" + e.to)) return;
-    if (!pfAdj[e.from]) pfAdj[e.from] = [];
-    pfAdj[e.from].push(e.to);
-    if (!pfAdj[e.to]) pfAdj[e.to] = [];
-    pfAdj[e.to].push(e.from);
+    if (tfEnabled && tfActiveEdges) {
+      if (tfActiveEdges.has(e.from + "-" + e.to)) {
+        if (!pfAdj[e.from]) pfAdj[e.from] = [];
+        pfAdj[e.from].push(e.to);
+      }
+      if (tfActiveEdges.has(e.to + "-" + e.from)) {
+        if (!pfAdj[e.to]) pfAdj[e.to] = [];
+        pfAdj[e.to].push(e.from);
+      }
+    } else {
+      if (!pfAdj[e.from]) pfAdj[e.from] = [];
+      pfAdj[e.from].push(e.to);
+      if (!pfAdj[e.to]) pfAdj[e.to] = [];
+      pfAdj[e.to].push(e.from);
+    }
   });
 
   if (activeCities.size < (isCycle ? 1 : 2)) {
@@ -1921,7 +1935,12 @@ function renderPfResultsList() {
   }
 
   lengths.forEach(function(n) {
-    groups[n].sort(function(a, b) { return pathLabel(a).localeCompare(pathLabel(b)); });
+    groups[n].sort(function(a, b) {
+      var ca = pathCostEur(a), cb = pathCostEur(b);
+      var va = ca ? ca.total : Infinity, vb = cb ? cb.total : Infinity;
+      if (va !== vb) return va - vb;
+      return pathLabel(a).localeCompare(pathLabel(b));
+    });
 
     var grp = document.createElement("div");
     grp.className = "pf-grp open";
@@ -1989,6 +2008,31 @@ function renderPfResultsList() {
   refreshSelectedPfArcs();
 }
 
+function pathCostEur(path) {
+  var total = 0;
+  var allKnown = true;
+  var today = new Date().toISOString().slice(0, 10);
+  var tfStart = tfEnabled ? document.getElementById("tf-start").value : null;
+  var tfEnd = tfEnabled ? document.getElementById("tf-end").value : null;
+  for (var i = 0; i < path.length - 1; i++) {
+    var key = path[i] + "-" + path[i + 1];
+    var flights = fareByRoute[key] || [];
+    var best = null;
+    for (var j = 0; j < flights.length; j++) {
+      var f = flights[j];
+      if (f.date < today) continue;
+      if (tfStart && f.date < tfStart) continue;
+      if (tfEnd && f.date > tfEnd) continue;
+      if (f.price <= 0 || f.eur <= 0) continue;
+      if (best === null || f.eur < best) best = f.eur;
+    }
+    if (best === null) { allKnown = false; }
+    else { total += best; }
+  }
+  if (!allKnown && total === 0) return null;
+  return {total: Math.round(total * 100) / 100, partial: !allKnown};
+}
+
 function makePfRow(path, selKeys) {
   var row = document.createElement("div");
   row.className = "pf-row";
@@ -1999,6 +2043,17 @@ function makePfRow(path, selKeys) {
   var cb = document.createElement("input");
   cb.type = "checkbox";
   cb.checked = !!isSel;
+
+  var cost = pathCostEur(path);
+  var costSpan = document.createElement("span");
+  costSpan.className = "pf-row-cost";
+  if (cost) {
+    costSpan.textContent = (cost.partial ? "~" : "") + cost.total.toFixed(0) + "\u20AC";
+    costSpan.title = cost.partial ? "Partial: some legs have no fare data" : "Total cheapest fares in EUR";
+  } else {
+    costSpan.textContent = "--";
+    costSpan.title = "No fare data available";
+  }
 
   var lbl = document.createElement("span");
   lbl.className = "pf-row-lbl";
@@ -2018,6 +2073,7 @@ function makePfRow(path, selKeys) {
   }
 
   row.appendChild(cb);
+  row.appendChild(costSpan);
   row.appendChild(lbl);
 
   function doToggle() {
