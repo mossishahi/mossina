@@ -34,6 +34,7 @@ def scrape_airports(conn):
     route_count = 0
     now = datetime.now(timezone.utc).isoformat()
 
+    # Pass 1: insert all airports so FK references are satisfied.
     for city in cities:
         iata = city.get("iata", "").strip()
         if not iata or iata in fake_iatas:
@@ -62,6 +63,14 @@ def scrape_airports(conn):
             (iata, name, name, cc, lat, lon, ""),
         )
         airports.append(iata)
+
+    conn.commit()
+
+    # Pass 2: insert routes (all destination airports now exist).
+    for city in cities:
+        iata = city.get("iata", "").strip()
+        if not iata or iata in fake_iatas:
+            continue
 
         for conn_info in city.get("connections", []):
             dest = conn_info.get("iata", "").strip()
