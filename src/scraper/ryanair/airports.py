@@ -75,9 +75,11 @@ def scrape_airports(conn):
         return []
 
     airports = []
+    parsed = []
     countries_seen = set()
     route_count = 0
 
+    # Pass 1: insert all airports so FK references are satisfied.
     for raw in data:
         ap = parser(raw)
         iata = ap["iata"]
@@ -100,8 +102,14 @@ def scrape_airports(conn):
             (iata, ap["name"], ap["city"], cc, ap["lat"], ap["lon"], ap["tz"]),
         )
         airports.append(iata)
+        parsed.append(ap)
 
-        now = datetime.now(timezone.utc).isoformat()
+    conn.commit()
+
+    # Pass 2: insert routes (all destination airports now exist).
+    now = datetime.now(timezone.utc).isoformat()
+    for ap in parsed:
+        iata = ap["iata"]
         for dest in ap["routes"]:
             try:
                 conn.execute(
