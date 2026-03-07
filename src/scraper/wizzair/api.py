@@ -42,14 +42,21 @@ _last_request_time = 0.0
 _MIN_INTERVAL = 0.5
 
 
-def _throttle():
+def _interruptible_sleep(seconds, stop_event=None):
+    if stop_event is None:
+        time.sleep(seconds)
+    else:
+        stop_event.wait(seconds)
+
+
+def _throttle(stop_event=None):
     """Global rate limiter: ensures at least _MIN_INTERVAL between requests."""
     global _last_request_time
     with _throttle_lock:
         now = time.time()
         wait = _MIN_INTERVAL - (now - _last_request_time)
         if wait > 0:
-            time.sleep(wait)
+            _interruptible_sleep(wait, stop_event)
         _last_request_time = time.time()
 
 
@@ -60,10 +67,11 @@ class WizzairSession:
     CSRF token -- safe to use from a single thread without locks.
     """
 
-    def __init__(self, worker_id=0, shared_api_base=None):
+    def __init__(self, worker_id=0, shared_api_base=None, stop_event=None):
         self.worker_id = worker_id
         self._session = None
         self._api_base = shared_api_base
+        self._stop = stop_event
 
     def _ensure_session(self):
         if self._session is None:
@@ -97,6 +105,9 @@ class WizzairSession:
         if token:
             self._session.headers["X-RequestVerificationToken"] = token
 
+    def _stopped(self):
+        return self._stop is not None and self._stop.is_set()
+
     def post(self, path, payload):
         """POST with retry, backoff, and session-refresh logic."""
         base = self._base()
@@ -105,9 +116,13 @@ class WizzairSession:
         sess = self._session
 
         for attempt in range(1, _POST_RETRIES + 1):
+            if self._stopped():
+                return None
             try:
-                _throttle()
-                resp = sess.post(url, json=payload, timeout=30)
+                _throttle(self._stop)
+                if self._stopped():
+                    return None
+                resp = sess.post(url, json=payload, timeout=10)
 
                 if resp.status_code == 200:
                     self._sync_token()
@@ -121,7 +136,7 @@ class WizzairSession:
                         self.worker_id, resp.status_code, wait, attempt,
                     )
                     self._session = None
-                    time.sleep(wait)
+                    _interruptible_sleep(wait, self._stop)
                     self._ensure_session()
                     sess = self._session
                     continue
@@ -132,7 +147,7 @@ class WizzairSession:
                 if resp.status_code == 400 and attempt < _POST_RETRIES:
                     log.debug("[W6-w%d] 400 refreshing session", self.worker_id)
                     self._session = None
-                    time.sleep(2)
+                    _interruptible_sleep(2, self._stop)
                     self._ensure_session()
                     sess = self._session
                     continue
@@ -148,7 +163,7 @@ class WizzairSession:
                 )
 
             if attempt < _POST_RETRIES:
-                time.sleep(RETRY_BACKOFF * attempt)
+                _interruptible_sleep(RETRY_BACKOFF * attempt, self._stop)
 
         log.error("[W6-w%d] POST failed after %d attempts: %s",
                   self.worker_id, _POST_RETRIES, url)
@@ -162,15 +177,19 @@ class WizzairSession:
         sess = self._session
 
         for attempt in range(1, MAX_RETRIES + 1):
+            if self._stopped():
+                return None
             try:
-                time.sleep(1.0)
-                resp = sess.get(url, params=params, timeout=30)
+                _interruptible_sleep(1.0, self._stop)
+                if self._stopped():
+                    return None
+                resp = sess.get(url, params=params, timeout=10)
                 if resp.status_code == 200:
                     return resp.json()
                 if resp.status_code == 429:
                     wait = RETRY_BACKOFF * attempt
                     log.warning("[W6-w%d] 429 waiting %ds", self.worker_id, wait)
-                    time.sleep(wait)
+                    _interruptible_sleep(wait, self._stop)
                     continue
                 if resp.status_code == 404:
                     return None
@@ -180,7 +199,7 @@ class WizzairSession:
                 log.warning("[W6-w%d] error: %s (attempt %d)",
                             self.worker_id, exc, attempt)
             if attempt < MAX_RETRIES:
-                time.sleep(RETRY_BACKOFF * attempt)
+                _interruptible_sleep(RETRY_BACKOFF * attempt, self._stop)
         log.error("[W6-w%d] GET failed after %d attempts: %s",
                   self.worker_id, MAX_RETRIES, url)
         return None
