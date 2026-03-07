@@ -86,7 +86,15 @@ def run_full_scrape(conn, airline_codes, args):
         log.info("Scraping %s (%s)", al["name"], code)
         log.info("=" * 40)
 
-        if args.fares_only:
+        if args.availability_only:
+            scrape_avail = al.get("scrape_availability")
+            if not scrape_avail:
+                log.warning("[%s] No availability scraper available, skipping.", code)
+                continue
+            origins = [o.strip().upper() for o in args.origins.split(",")] if args.origins else None
+            scrape_avail(conn, origins=origins, limit=args.fare_limit)
+
+        elif args.fares_only:
             airports = [r[0] for r in conn.execute("SELECT iata_code FROM airports")]
             if not airports:
                 log.error("No airports found. Run full scrape or --airports-only first.")
@@ -125,6 +133,10 @@ def main():
     parser.add_argument("--airports-only", action="store_true")
     parser.add_argument("--fares-only", action="store_true")
     parser.add_argument("--schedules-only", action="store_true")
+    parser.add_argument("--availability-only", action="store_true",
+                        help="Per-route daily fares via booking API (Ryanair)")
+    parser.add_argument("--origins", type=str, default=None,
+                        help="Comma-separated origin IATA codes to limit availability scraping")
     parser.add_argument("--schedule-limit", type=int, default=None)
     parser.add_argument("--fare-limit", type=int, default=None)
     parser.add_argument("--refresh-days", type=int, default=None,
