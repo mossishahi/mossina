@@ -11,6 +11,7 @@ AIRLINES = {
         "scrape_routes": ryanair.scrape_routes,
         "scrape_fares": ryanair.scrape_fares,
         "scrape_schedules": ryanair.scrape_schedules,
+        "scrape_availability": ryanair.scrape_availability,
     },
     "W6": {
         "name": "Wizz Air",
