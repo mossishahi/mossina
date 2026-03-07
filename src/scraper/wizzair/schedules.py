@@ -19,6 +19,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
+from src.db import log_api_fetch
 from src.scraper.wizzair.api import WizzairSession
 
 log = logging.getLogger("scraper")
@@ -115,6 +116,15 @@ def _db_writer(conn, write_q, counters):
             conn.commit()
             break
 
+        if isinstance(item, tuple) and len(item) >= 2 and item[0] == "_log":
+            _, airline, origin, dest, endpoint, duration_ms = item
+            try:
+                log_api_fetch(conn, airline, origin, dest,
+                              endpoint, duration_ms)
+            except Exception:
+                pass
+            continue
+
         sched_rows, fare_rows = item
 
         for row in sched_rows:
@@ -151,13 +161,20 @@ def _db_writer(conn, write_q, counters):
 
 
 def _worker(worker_id, my_pairs, windows, scraped_at, write_q,
-            counters_lock, counters, shared_api_base):
+            counters_lock, counters, shared_api_base, on_progress=None,
+            stop_event=None):
     """Worker thread: HTTP only, pushes parsed results to write_q."""
-    sess = WizzairSession(worker_id=worker_id, shared_api_base=shared_api_base)
+    sess = WizzairSession(worker_id=worker_id, shared_api_base=shared_api_base,
+                          stop_event=stop_event)
     local_errors = 0
 
     for a, b in my_pairs:
+        if stop_event and stop_event.is_set():
+            break
+        pair_t0 = time.monotonic()
         for date_from, date_to in windows:
+            if stop_event and stop_event.is_set():
+                break
             payload = {
                 "flightList": [
                     {"departureStation": a, "arrivalStation": b,
@@ -191,13 +208,21 @@ def _worker(worker_id, my_pairs, windows, scraped_at, write_q,
             if all_sched or all_fare:
                 write_q.put((all_sched, all_fare))
 
-    with counters_lock:
-        counters["errors"] += local_errors
-        counters["done"] += len(my_pairs)
+        pair_ms = (time.monotonic() - pair_t0) * 1000
+        write_q.put(("_log", AIRLINE, a, b, "timetable", pair_ms))
+
+        with counters_lock:
+            counters["errors"] += local_errors
+            local_errors = 0
+            counters["done"] += 1
+            if on_progress:
+                on_progress(counters["done"], counters["total"],
+                            counters["fare"], pair_ms)
 
 
 def scrape_schedules(conn, limit=None, days_fresh=DEFAULT_FRESH_DAYS,
-                     num_windows=4, workers=DEFAULT_WORKERS, **_kwargs):
+                     num_windows=4, workers=DEFAULT_WORKERS,
+                     on_progress=None, stop_event=None, **_kwargs):
     """Fetch timetable data for Wizzair routes using parallel sessions.
 
     Args:
@@ -253,7 +278,8 @@ def scrape_schedules(conn, limit=None, days_fresh=DEFAULT_FRESH_DAYS,
 
     write_q = queue.Queue(maxsize=200)
     counters_lock = threading.Lock()
-    counters = {"sched": 0, "fare": 0, "errors": 0, "done": 0}
+    counters = {"sched": 0, "fare": 0, "errors": 0, "done": 0,
+                 "total": len(pairs)}
     t0 = time.time()
 
     writer = threading.Thread(
@@ -288,6 +314,7 @@ def scrape_schedules(conn, limit=None, days_fresh=DEFAULT_FRESH_DAYS,
             pool.submit(
                 _worker, i, chunks[i], windows, scraped_at,
                 write_q, counters_lock, counters, shared_api_base,
+                on_progress, stop_event,
             )
             for i in range(n_workers)
         ]
