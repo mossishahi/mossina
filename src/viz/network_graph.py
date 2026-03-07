@@ -247,11 +247,13 @@ def build_network_html(conn, output_path):
     html = html.replace("__AIRLINE_META__", json.dumps(airline_meta))
     html = html.replace("__FARE_DATA__", json.dumps(fare_data, separators=(",", ":")))
 
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(html, encoding="utf-8")
-    log.info("Graph written to %s (%d nodes, %d edges)", output_path, len(nodes_js), len(edges_js))
-    return output_path
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(html, encoding="utf-8")
+        log.info("Graph written to %s (%d nodes, %d edges)", output_path, len(nodes_js), len(edges_js))
+
+    return html
 
 
 _TEMPLATE = r"""<!DOCTYPE html>
@@ -474,6 +476,48 @@ _TEMPLATE = r"""<!DOCTYPE html>
     border-radius: 10px; padding: 10px 12px; backdrop-filter: blur(10px);
   }
   #pf-box h4 { font-size: 12px; color: #58a6ff; margin-bottom: 6px; }
+
+  #up-box {
+    background: rgba(22,27,34,0.94); border: 1px solid #30363d;
+    border-radius: 10px; padding: 10px 12px; backdrop-filter: blur(10px);
+  }
+  #up-box h4 { font-size: 12px; color: #58a6ff; margin-bottom: 8px; }
+  #up-airline-picks {
+    display: flex; gap: 12px; margin-bottom: 8px;
+  }
+  #up-airline-picks label {
+    font-size: 11px; color: #c9d1d9; display: flex; align-items: center; gap: 4px; cursor: pointer;
+  }
+  #up-airline-picks input { accent-color: #1f6feb; }
+  #up-btn {
+    padding: 7px 14px; font-size: 11px; font-weight: 600;
+    border-radius: 6px; cursor: pointer;
+    border: 1px solid #da3633; background: #da3633; color: #fff;
+    transition: background 0.15s; width: 100%;
+  }
+  #up-btn:hover { background: #f85149; }
+  #up-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  #up-desc { font-size: 9px; color: #484f58; margin-top: 6px; line-height: 1.3; }
+  .up-airline { margin-top: 8px; }
+  .up-airline-hd {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
+  }
+  .up-airline-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+  .up-airline-name { font-size: 11px; color: #c9d1d9; font-weight: 600; }
+  .up-airline-info { font-size: 9px; color: #8b949e; margin-left: auto; }
+  .up-bar-wrap {
+    height: 4px; background: #21262d; border-radius: 2px; overflow: hidden;
+  }
+  .up-bar {
+    height: 100%; width: 0%; border-radius: 2px;
+    transition: width 0.3s ease;
+  }
+  .up-bar.fr { background: #003399; }
+  .up-bar.w6 { background: #c6007e; }
+  .up-bar.viz { background: #3fb950; }
+  #up-status { font-size: 10px; color: #8b949e; margin-top: 8px; }
   #pf-modes { display: flex; gap: 10px; font-size: 11px; color: #8b949e; margin-bottom: 6px; }
   #pf-modes label { display: flex; align-items: center; gap: 3px; cursor: pointer; }
   #pf-modes input { accent-color: #1f6feb; }
@@ -730,6 +774,19 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div id="pf-progress"><div id="pf-progress-bar"></div></div>
     <div id="pf-status"></div>
     <div id="pf-results"></div>
+  </div>
+  <div id="up-box">
+    <h4>Update Prices</h4>
+    <div id="up-airline-picks">
+      <label><input type="checkbox" value="FR" checked> Ryanair</label>
+      <label><input type="checkbox" value="W6" checked> Wizz Air</label>
+    </div>
+    <button id="up-btn" onclick="togglePriceUpdate()">Fetch latest prices</button>
+    <div id="up-desc">
+      Select airlines and cities, then fetch.
+    </div>
+    <div id="up-airlines"></div>
+    <div id="up-status"></div>
   </div>
 </div>
 
@@ -2277,6 +2334,204 @@ document.getElementById("select-all-cb").addEventListener("change", function() {
     document.body.style.userSelect = "";
   });
 })();
+
+/* ---- Update Prices via SSE ---- */
+var _upRunning = false;
+var _upEs = null;
+
+function fmtDuration(ms) {
+  if (ms == null || ms <= 0) return "";
+  var sec = Math.round(ms / 1000);
+  if (sec < 60) return sec + "s";
+  var m = Math.floor(sec / 60);
+  var s = sec % 60;
+  return m + "m" + (s > 0 ? " " + s + "s" : "");
+}
+
+function togglePriceUpdate() {
+  if (_upRunning) {
+    stopPriceUpdate();
+  } else {
+    startPriceUpdate();
+  }
+}
+
+function stopPriceUpdate() {
+  var btn = document.getElementById("up-btn");
+  var statusEl = document.getElementById("up-status");
+  btn.disabled = true;
+  btn.textContent = "Stopping...";
+  statusEl.textContent = "Saving progress and stopping...";
+  statusEl.style.color = "#e3b341";
+
+  fetch(window.location.origin + "/api/stop-update").catch(function() {});
+}
+
+function startPriceUpdate() {
+  if (_upRunning) return;
+  _upRunning = true;
+
+  var btn = document.getElementById("up-btn");
+  var airlinesEl = document.getElementById("up-airlines");
+  var statusEl = document.getElementById("up-status");
+  btn.textContent = "Stop";
+  btn.style.borderColor = "#da3633";
+  btn.style.background = "#da3633";
+  airlinesEl.innerHTML = "";
+  statusEl.textContent = "";
+  statusEl.style.color = "#8b949e";
+
+  var bars = {};
+
+  var picks = document.querySelectorAll("#up-airline-picks input:checked");
+  var airlines = Array.from(picks).map(function(cb) { return cb.value; });
+  if (airlines.length === 0) {
+    document.getElementById("up-status").textContent = "Select at least one airline";
+    document.getElementById("up-status").style.color = "#f85149";
+    _upRunning = false;
+    return;
+  }
+
+  var params = [];
+  params.push("airlines=" + encodeURIComponent(airlines.join(",")));
+  if (activeCities.size > 0) {
+    params.push("origins=" + encodeURIComponent(Array.from(activeCities).join(",")));
+  }
+  var sseUrl = window.location.origin + "/api/update-prices?" + params.join("&");
+
+  var es;
+  try {
+    es = new EventSource(sseUrl);
+    _upEs = es;
+  } catch (e) {
+    statusEl.textContent = "Connection failed";
+    statusEl.style.color = "#f85149";
+    _resetBtn();
+    return;
+  }
+
+  es.onerror = function() {
+    if (!bars || Object.keys(bars).length === 0) {
+      statusEl.textContent = "Connection failed";
+      statusEl.style.color = "#f85149";
+    }
+    es.close();
+    _upEs = null;
+    _resetBtn();
+  };
+
+  function getOrCreateBar(code, name) {
+    if (bars[code]) return bars[code];
+    var div = document.createElement("div");
+    div.className = "up-airline";
+    var colorMap = {FR: "#003399", W6: "#c6007e"};
+    div.innerHTML =
+      '<div class="up-airline-hd">' +
+        '<span class="up-airline-dot" style="background:' + (colorMap[code] || "#888") + '"></span>' +
+        '<span class="up-airline-name">' + name + '</span>' +
+        '<span class="up-airline-info" id="up-info-' + code + '">Starting...</span>' +
+      '</div>' +
+      '<div class="up-bar-wrap"><div class="up-bar ' + code.toLowerCase() + '" id="up-bar-' + code + '"></div></div>';
+    airlinesEl.appendChild(div);
+    bars[code] = {
+      bar: document.getElementById("up-bar-" + code),
+      info: document.getElementById("up-info-" + code),
+      avgMs: null,
+      startTime: null,
+    };
+    return bars[code];
+  }
+
+  es.addEventListener("start", function(e) {
+    var d = JSON.parse(e.data);
+    var b = getOrCreateBar(d.airline, d.name);
+    b.avgMs = d.avg_route_ms || null;
+    b.startTime = Date.now();
+    var hint = b.avgMs ? " (avg " + fmtDuration(b.avgMs) + "/route)" : "";
+    b.info.textContent = "Starting..." + hint;
+    b.bar.style.width = "0%";
+  });
+
+  es.addEventListener("progress", function(e) {
+    var d = JSON.parse(e.data);
+    var b = getOrCreateBar(d.airline, d.airline);
+    var pct = d.total > 0 ? Math.round(d.done / d.total * 100) : 0;
+    b.bar.style.width = pct + "%";
+
+    var remaining = d.total - d.done;
+    var eta = "";
+    if (remaining > 0 && b.startTime) {
+      var elapsed = Date.now() - b.startTime;
+      if (d.done > 0) {
+        var perRoute = elapsed / d.done;
+        eta = " \u2022 ETA " + fmtDuration(remaining * perRoute);
+      } else if (b.avgMs) {
+        eta = " \u2022 ETA " + fmtDuration(remaining * b.avgMs);
+      }
+    }
+
+    var lastStr = d.route_ms ? " (" + fmtDuration(d.route_ms) + ")" : "";
+    b.info.textContent = d.done + "/" + d.total + " routes" + lastStr + eta +
+      " \u2022 " + d.fares + " prices total";
+  });
+
+  es.addEventListener("done", function(e) {
+    var d = JSON.parse(e.data);
+    if (bars[d.airline]) {
+      var b = bars[d.airline];
+      b.bar.style.width = "100%";
+      var elapsed = b.startTime ? fmtDuration(Date.now() - b.startTime) : "";
+      b.info.textContent = "Done" + (elapsed ? " in " + elapsed : "");
+      b.info.style.color = "#3fb950";
+    }
+  });
+
+  es.addEventListener("stopped", function(e) {
+    var d = JSON.parse(e.data);
+    if (bars[d.airline]) {
+      bars[d.airline].info.textContent += " — stopped (data saved)";
+      bars[d.airline].info.style.color = "#e3b341";
+    }
+  });
+
+  es.addEventListener("error", function(e) {
+    try {
+      var d = JSON.parse(e.data);
+      if (bars[d.airline]) {
+        bars[d.airline].info.textContent = "Error: " + d.message;
+        bars[d.airline].info.style.color = "#f85149";
+      }
+    } catch (_) {}
+  });
+
+  es.addEventListener("complete", function(e) {
+    var d = JSON.parse(e.data);
+    es.close();
+    _upEs = null;
+    _resetBtn();
+    if (d.stopped) {
+      statusEl.textContent = "Stopped — partial data saved. Reloading...";
+      statusEl.style.color = "#e3b341";
+      setTimeout(function() { window.location.reload(); }, 1500);
+    } else if (d.success) {
+      statusEl.textContent = "Prices updated! Reloading page...";
+      statusEl.style.color = "#3fb950";
+      setTimeout(function() { window.location.reload(); }, 1500);
+    } else {
+      statusEl.textContent = "Completed with errors: " + d.errors.join(", ");
+      statusEl.style.color = "#f85149";
+    }
+  });
+}
+
+function _resetBtn() {
+  _upRunning = false;
+  var btn = document.getElementById("up-btn");
+  btn.disabled = false;
+  btn.textContent = "Fetch latest prices";
+  btn.style.borderColor = "";
+  btn.style.background = "";
+}
 </script>
 </body>
 </html>
