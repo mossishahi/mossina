@@ -70,11 +70,24 @@ CREATE TABLE IF NOT EXISTS fares (
     FOREIGN KEY (destination) REFERENCES airports(iata_code)
 );
 
+CREATE TABLE IF NOT EXISTS api_fetch_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    airline         TEXT NOT NULL,
+    origin          TEXT,
+    destination     TEXT,
+    endpoint        TEXT,
+    duration_ms     REAL NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'ok',
+    fetched_at      TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_routes_origin ON routes(origin);
 CREATE INDEX IF NOT EXISTS idx_routes_destination ON routes(destination);
 CREATE INDEX IF NOT EXISTS idx_schedules_route ON schedules(origin, destination);
 CREATE INDEX IF NOT EXISTS idx_fares_route ON fares(origin, destination);
 CREATE INDEX IF NOT EXISTS idx_fares_date ON fares(departure_date);
+CREATE INDEX IF NOT EXISTS idx_fetch_log_airline ON api_fetch_log(airline);
+CREATE INDEX IF NOT EXISTS idx_fetch_log_route ON api_fetch_log(origin, destination);
 """
 
 
@@ -179,3 +192,33 @@ def airline_summary(conn):
         "SELECT airline, COUNT(*) FROM routes GROUP BY airline"
     ).fetchall()
     return {code: cnt for code, cnt in rows}
+
+
+def log_api_fetch(conn, airline, origin, destination, endpoint,
+                  duration_ms, status="ok"):
+    """Record an API fetch timing entry."""
+    conn.execute(
+        """INSERT INTO api_fetch_log
+           (airline, origin, destination, endpoint, duration_ms, status, fetched_at)
+           VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+        (airline, origin, destination, endpoint, duration_ms, status),
+    )
+
+
+def avg_fetch_time(conn, airline):
+    """Return the average duration_ms per route for the given airline.
+
+    Averages are computed from the last 7 days of successful fetches,
+    grouped by (origin, destination) then averaged across all routes.
+    """
+    row = conn.execute(
+        """SELECT AVG(route_avg) FROM (
+               SELECT AVG(duration_ms) AS route_avg
+               FROM api_fetch_log
+               WHERE airline = ? AND status = 'ok'
+                 AND fetched_at >= datetime('now', '-7 days')
+               GROUP BY origin, destination
+           )""",
+        (airline,),
+    ).fetchone()
+    return row[0] if row and row[0] else None
