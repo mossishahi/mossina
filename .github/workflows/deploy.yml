@@ -62,6 +62,23 @@ jobs:
     needs: build-and-push
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Copy docker-compose.yml from repo to Droplet ──────────────────────
+      # This runs before the SSH step so the server is always in sync with
+      # whatever is in the repository. No more manual edits on the server.
+      - name: Sync docker-compose.yml to Droplet
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          source: "docker-compose.yml"
+          target: "/opt/mossina/"
+          strip_components: 0
+
+      # ── SSH in and run the rest of the deploy ─────────────────────────────
       - name: SSH into Droplet and deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -83,8 +100,6 @@ jobs:
             docker image prune -f
 
             echo "==> Writing secrets to .env file..."
-            # docker compose reads /opt/mossina/.env automatically.
-            # File is root-only readable so secrets stay off the filesystem.
             cat > /opt/mossina/.env << ENV
             TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
             TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
