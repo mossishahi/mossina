@@ -35,7 +35,22 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
-
+  # ─── Web UI ──────────────────────────────────────────────────────────────────
+  # Serves the generated HTML visualisation at http://YOUR_IP:8080
+  # Starts automatically on every deploy and restarts if the server reboots.
+  web:
+    image: nginx:alpine
+    container_name: mossina_web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - mossina_output:/usr/share/nginx/html:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
 # ─── Volumes ────────────────────────────────────────────────────────────────
 volumes:
   mossina_data:

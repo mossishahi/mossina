@@ -110,6 +110,10 @@ jobs:
             echo "==> Ensuring log files exist..."
             touch /var/log/mossina-scrape.log /var/log/mossina-viz.log
 
+            echo "==> Starting web server..."
+            docker compose -f /opt/mossina/docker-compose.yml up -d web
+            echo "    Web server running at http://$(curl -fsS ifconfig.me):8080"
+
             echo "==> Deploy complete"
         env:
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
