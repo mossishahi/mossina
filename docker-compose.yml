@@ -1,0 +1,45 @@
+services:
+
+  # ─── Scraper ────────────────────────────────────────────────────────────────
+  # Run on-demand or via server cron. Never keeps a process alive between runs.
+  scraper:
+    image: ghcr.io/${GITHUB_REPOSITORY:-your-org/mossina}:latest
+    container_name: mossina_scraper
+    restart: "no"                       # cron controls when this runs
+    command: ["python", "scrape.py"]    # override per cron entry as needed
+    volumes:
+      - mossina_data:/app/data          # persists flights.db across runs
+      - mossina_output:/app/output      # persists generated HTML reports
+    environment:
+      - PYTHONUNBUFFERED=1              # ensures logs stream in real time
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ─── Visualizer ─────────────────────────────────────────────────────────────
+  # Generates output/route_network.html from the current DB state.
+  visualizer:
+    image: ghcr.io/${GITHUB_REPOSITORY:-your-org/mossina}:latest
+    container_name: mossina_visualizer
+    restart: "no"
+    command: ["python", "visualize.py"]
+    volumes:
+      - mossina_data:/app/data
+      - mossina_output:/app/output
+    environment:
+      - PYTHONUNBUFFERED=1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+# ─── Volumes ────────────────────────────────────────────────────────────────
+# Named Docker volumes — data survives container removal and re-deploys.
+volumes:
+  mossina_data:
+    driver: local
+  mossina_output:
+    driver: local
