@@ -56,7 +56,7 @@ def scrape_fares(conn, airports, limit=None):
 
             if dest_code and price is not None:
                 conn.execute(
-                    """INSERT INTO fares
+                    """INSERT OR REPLACE INTO fares
                        (origin, destination, airline, departure_date, arrival_date,
                         price, currency, flight_number, scraped_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",

@@ -64,8 +64,9 @@ CREATE TABLE IF NOT EXISTS fares (
     arrival_date    TEXT,
     price           REAL,
     currency        TEXT,
-    flight_number   TEXT,
+    flight_number   TEXT NOT NULL DEFAULT '',
     scraped_at      TEXT,
+    UNIQUE(origin, destination, airline, departure_date, flight_number),
     FOREIGN KEY (origin)      REFERENCES airports(iata_code),
     FOREIGN KEY (destination) REFERENCES airports(iata_code)
 );
@@ -172,6 +173,43 @@ def _migrate(conn):
     cols_f = {r[1] for r in conn.execute("PRAGMA table_info(fares)")}
     if "airline" not in cols_f:
         conn.execute("ALTER TABLE fares ADD COLUMN airline TEXT NOT NULL DEFAULT 'FR'")
+        conn.commit()
+
+    # Add UNIQUE constraint to fares if missing (rebuild required).
+    fares_idxs = conn.execute("PRAGMA index_list(fares)").fetchall()
+    has_fares_uniq = any(idx[2] for idx in fares_idxs)  # idx[2] == unique flag
+    if not has_fares_uniq:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS fares_new (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                origin          TEXT NOT NULL,
+                destination     TEXT NOT NULL,
+                airline         TEXT NOT NULL DEFAULT 'FR',
+                departure_date  TEXT,
+                arrival_date    TEXT,
+                price           REAL,
+                currency        TEXT,
+                flight_number   TEXT NOT NULL DEFAULT '',
+                scraped_at      TEXT,
+                UNIQUE(origin, destination, airline, departure_date, flight_number),
+                FOREIGN KEY (origin)      REFERENCES airports(iata_code),
+                FOREIGN KEY (destination) REFERENCES airports(iata_code)
+            );
+            INSERT OR IGNORE INTO fares_new
+                (origin, destination, airline, departure_date, arrival_date,
+                 price, currency, flight_number, scraped_at)
+                SELECT origin, destination,
+                       COALESCE(airline, 'FR'),
+                       departure_date, arrival_date,
+                       price, currency,
+                       COALESCE(flight_number, ''),
+                       scraped_at
+                FROM fares;
+            DROP TABLE fares;
+            ALTER TABLE fares_new RENAME TO fares;
+            CREATE INDEX IF NOT EXISTS idx_fares_route ON fares(origin, destination);
+            CREATE INDEX IF NOT EXISTS idx_fares_date ON fares(departure_date);
+        """)
         conn.commit()
 
 

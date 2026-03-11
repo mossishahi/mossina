@@ -26,15 +26,42 @@ AVAILABILITY_URL = (
 )
 
 FLEX_DAYS = 6  # 0-indexed; max accepted by the API (covers 7 days per call)
+DEFAULT_FRESH_DAYS = 1
 
 
-def scrape_availability(conn, origins=None, limit=None, on_progress=None,
-                        stop_event=None):
+def _stale_routes(conn, origins, days_fresh):
+    """Return routes with no availability fetch or fetch older than days_fresh."""
+    cutoff = (datetime.utcnow() - timedelta(days=days_fresh)).isoformat()
+    query = """
+        SELECT DISTINCT r.origin, r.destination
+        FROM routes r
+        LEFT JOIN (
+            SELECT origin, destination, MAX(fetched_at) AS last
+            FROM api_fetch_log
+            WHERE airline = ? AND endpoint = 'availability'
+            GROUP BY origin, destination
+        ) l ON r.origin = l.origin AND r.destination = l.destination
+        WHERE r.airline = ?
+          AND (l.last IS NULL OR l.last < ?)
+    """
+    params = [AIRLINE, AIRLINE, cutoff]
+    if origins:
+        placeholders = ",".join("?" for _ in origins)
+        query += (f" AND (r.origin IN ({placeholders})"
+                  f" OR r.destination IN ({placeholders}))")
+        params.extend(origins)
+        params.extend(origins)
+    return conn.execute(query, params).fetchall()
+
+
+def scrape_availability(conn, origins=None, limit=None, days_fresh=DEFAULT_FRESH_DAYS,
+                        on_progress=None, stop_event=None):
     """Fetch per-route daily fares for Ryanair routes over the next 3 months.
 
     Args:
         origins:      only scrape routes departing from these airports
         limit:        max number of routes to process
+        days_fresh:   skip routes fetched within this many days (0 = force all)
         on_progress:  optional callback ``fn(done, total, fares, route_ms)``
         stop_event:   a ``threading.Event``; when set the scraper saves
                       progress and returns early
@@ -42,15 +69,28 @@ def scrape_availability(conn, origins=None, limit=None, on_progress=None,
     now = datetime.utcnow()
     scraped_at = now.isoformat()
 
-    query = "SELECT DISTINCT origin, destination FROM routes WHERE airline = ?"
-    params = [AIRLINE]
-    if origins:
-        placeholders = ",".join("?" for _ in origins)
-        query += (f" AND (origin IN ({placeholders})"
-                  f" OR destination IN ({placeholders}))")
-        params.extend(origins)
-        params.extend(origins)
-    routes = conn.execute(query, params).fetchall()
+    total_routes = conn.execute(
+        "SELECT COUNT(DISTINCT origin, destination) FROM routes WHERE airline = ?",
+        (AIRLINE,)
+    ).fetchone()[0]
+
+    if days_fresh > 0:
+        routes = _stale_routes(conn, origins, days_fresh)
+    else:
+        query = "SELECT DISTINCT origin, destination FROM routes WHERE airline = ?"
+        params = [AIRLINE]
+        if origins:
+            placeholders = ",".join("?" for _ in origins)
+            query += (f" AND (origin IN ({placeholders})"
+                      f" OR destination IN ({placeholders}))")
+            params.extend(origins)
+            params.extend(origins)
+        routes = conn.execute(query, params).fetchall()
+
+    if not routes:
+        log.info("[%s] All %d routes are fresh (within %d days). Nothing to do.",
+                 AIRLINE, total_routes, days_fresh)
+        return
 
     if limit:
         routes = routes[:limit]
@@ -59,8 +99,8 @@ def scrape_availability(conn, origins=None, limit=None, on_progress=None,
     end_date = (now + timedelta(days=90))
 
     log.info(
-        "[%s] Fetching availability fares for %d routes (%s to %s) ...",
-        AIRLINE, len(routes), today, end_date.strftime("%Y-%m-%d"),
+        "[%s] Fetching availability fares for %d/%d routes (%s to %s) ...",
+        AIRLINE, len(routes), total_routes, today, end_date.strftime("%Y-%m-%d"),
     )
 
     total = 0
