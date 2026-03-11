@@ -135,9 +135,11 @@ jobs:
         if: success()
         run: |
           SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          RESPONSE=$(curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -H "Content-Type: application/json" \
-            -d "{\"chat_id\": \"${TELEGRAM_CHAT_ID}\", \"text\": \"Mossina deployed successfully (${SHA} by ${{ github.actor }})\"}"
+            -d "{\"chat_id\": \"${TELEGRAM_CHAT_ID}\", \"text\": \"Mossina deployed successfully (${SHA} by ${{ github.actor }})\"}")
+          echo "Telegram response: ${RESPONSE}"
+          echo "${RESPONSE}" | grep -q '"ok":true' || (echo "Telegram API error" && exit 1)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
