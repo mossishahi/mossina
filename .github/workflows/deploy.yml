@@ -81,11 +81,15 @@ jobs:
       # ── SSH in and run the rest of the deploy ─────────────────────────────
       - name: SSH into Droplet and deploy
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_PAT: ${{ secrets.GH_PAT }}
         with:
           host: ${{ secrets.DO_HOST }}
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
-          envs: TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID
+          envs: TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID,GH_PAT
           script: |
             set -e
 
@@ -124,6 +128,15 @@ jobs:
 
             echo "==> Ensuring log files exist..."
             touch /var/log/mossina-scrape.log /var/log/mossina-viz.log
+
+            echo "==> Syncing dev directory..."
+            REPO_URL="https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
+            if [ -d ~/mossina-dev/.git ]; then
+              git -C ~/mossina-dev pull
+            else
+              git clone "$REPO_URL" ~/mossina-dev
+            fi
+            echo "    Dev directory synced at ~/mossina-dev"
 
             echo "==> Starting web server..."
             docker compose -f /opt/mossina/docker-compose.yml up -d web
