@@ -134,9 +134,10 @@ jobs:
       - name: Notify Telegram on success
         if: success()
         run: |
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="✅ Mossina deployed successfully ($(echo '${{ github.sha }}' | cut -c1-7) by ${{ github.actor }})"
+            --data-urlencode "text=Mossina deployed successfully (${SHA} by ${{ github.actor }})"
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
