@@ -213,10 +213,6 @@ def main():
         print(f"  {table:<12} {total:>8}  {d_str:>8}")
     print(f"{'='*55}\n")
 
-    # ── Send Telegram notification ────────────────────────────────────────────
-    message = build_telegram_message(run_at, args.airline, current, deltas)
-    send_telegram(message)
-    print("[log_stats] Telegram notification sent.")
 
 
 if __name__ == "__main__":

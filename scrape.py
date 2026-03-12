@@ -14,13 +14,64 @@ Usage:
 """
 
 import argparse
+import json
+import os
 import sys
+import urllib.parse
+import urllib.request
 
 from src.config import DB_PATH, setup_logging
 from src.db import connect, table_counts, airline_summary
 from src.scraper import get_airline, list_airlines, AIRLINES
 
 log = setup_logging()
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
+
+
+def send_telegram(message: str):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    url  = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    data = urllib.parse.urlencode({
+        "chat_id":    TELEGRAM_CHAT_ID,
+        "text":       message,
+        "parse_mode": "HTML",
+    }).encode()
+    try:
+        req = urllib.request.Request(url, data=data, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read())
+            if not result.get("ok"):
+                log.warning("Telegram API error: %s", result)
+    except Exception as e:
+        log.warning("Telegram send failed (non-fatal): %s", e)
+
+
+def get_db_counts(conn):
+    counts = {}
+    for table in ["countries", "airports", "routes", "schedules", "fares"]:
+        try:
+            counts[table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        except Exception:
+            counts[table] = 0
+    return counts
+
+
+def build_airline_message(code: str, success: bool, error: str | None, before: dict, after: dict) -> str:
+    status = "✅ <b>Scrape complete</b>" if success else "❌ <b>Scrape failed</b>"
+    lines  = [status, f"✈️  Airline: <b>{code}</b>"]
+    if error:
+        lines.append(f"💥 Error: {error}")
+    lines += ["", "<pre>", f"{'Table':<12} {'Total':>8}   {'Change':>10}", "-" * 36]
+    for key in ["countries", "airports", "routes", "schedules", "fares"]:
+        total = after.get(key, 0)
+        delta = total - before.get(key, 0)
+        d_str = f"+{delta}" if delta > 0 else str(delta) if delta < 0 else "no change"
+        lines.append(f"{key.capitalize():<12} {total:>8}   {d_str:>10}")
+    lines.append("</pre>")
+    return "\n".join(lines)
 
 
 def print_summary(conn, db_path):
@@ -53,73 +104,93 @@ def do_update(conn, airline_codes):
     """Daily update: refresh airports and directed routes for given airlines."""
     for code in airline_codes:
         al = get_airline(code)
-        routes_before = conn.execute(
-            "SELECT COUNT(*) FROM routes WHERE airline = ?", (code,)
-        ).fetchone()[0]
+        before  = get_db_counts(conn)
+        success = True
+        error   = None
+        try:
+            routes_before = conn.execute(
+                "SELECT COUNT(*) FROM routes WHERE airline = ?", (code,)
+            ).fetchone()[0]
 
-        airports = al["scrape_airports"](conn)
-        if not airports:
-            log.error("[%s] Airport fetch failed. Skipping.", code)
-            continue
+            airports = al["scrape_airports"](conn)
+            if not airports:
+                raise RuntimeError("Airport fetch returned no results")
 
-        has_inline = conn.execute(
-            "SELECT COUNT(*) FROM routes WHERE airline = ? AND last_seen >= datetime('now', '-1 minute')",
-            (code,),
-        ).fetchone()[0] > 0
+            has_inline = conn.execute(
+                "SELECT COUNT(*) FROM routes WHERE airline = ? AND last_seen >= datetime('now', '-1 minute')",
+                (code,),
+            ).fetchone()[0] > 0
 
-        if not has_inline:
-            log.info("[%s] No inline routes. Falling back to per-airport fetch ...", code)
-            al["scrape_routes"](conn, airports, force=True)
+            if not has_inline:
+                log.info("[%s] No inline routes. Falling back to per-airport fetch ...", code)
+                al["scrape_routes"](conn, airports, force=True)
 
-        routes_after = conn.execute(
-            "SELECT COUNT(*) FROM routes WHERE airline = ?", (code,)
-        ).fetchone()[0]
-        new_routes = routes_after - routes_before
-        log.info("[%s] Update complete: %d new routes, %d total", code, new_routes, routes_after)
+            routes_after = conn.execute(
+                "SELECT COUNT(*) FROM routes WHERE airline = ?", (code,)
+            ).fetchone()[0]
+            new_routes = routes_after - routes_before
+            log.info("[%s] Update complete: %d new routes, %d total", code, new_routes, routes_after)
+        except Exception as exc:
+            success = False
+            error   = str(exc)
+            log.error("[%s] Update failed: %s", code, exc)
+        finally:
+            after = get_db_counts(conn)
+            send_telegram(build_airline_message(code, success, error, before, after))
 
 
 def run_full_scrape(conn, airline_codes, args):
     """Full scrape pipeline for the given airlines."""
     for code in airline_codes:
-        al = get_airline(code)
+        al      = get_airline(code)
+        before  = get_db_counts(conn)
+        success = True
+        error   = None
         log.info("=" * 40)
         log.info("Scraping %s (%s)", al["name"], code)
         log.info("=" * 40)
+        try:
+            if args.availability_only:
+                scrape_avail = al.get("scrape_availability")
+                if not scrape_avail:
+                    log.warning("[%s] No availability scraper available, skipping.", code)
+                    continue
+                origins = [o.strip().upper() for o in args.origins.split(",")] if args.origins else None
+                scrape_avail(conn, origins=origins, limit=args.fare_limit)
 
-        if args.availability_only:
-            scrape_avail = al.get("scrape_availability")
-            if not scrape_avail:
-                log.warning("[%s] No availability scraper available, skipping.", code)
-                continue
-            origins = [o.strip().upper() for o in args.origins.split(",")] if args.origins else None
-            scrape_avail(conn, origins=origins, limit=args.fare_limit)
-
-        elif args.fares_only:
-            airports = [r[0] for r in conn.execute("SELECT iata_code FROM airports")]
-            if not airports:
-                log.error("No airports found. Run full scrape or --airports-only first.")
-                sys.exit(1)
-            al["scrape_fares"](conn, airports, limit=args.fare_limit)
-
-        elif args.schedules_only:
-            kwargs = {"limit": args.schedule_limit}
-            if args.refresh_days is not None:
-                kwargs["days_fresh"] = args.refresh_days
-            if args.workers:
-                kwargs["workers"] = args.workers
-            al["scrape_schedules"](conn, **kwargs)
-
-        elif args.airports_only:
-            airports = al["scrape_airports"](conn)
-            if airports:
-                al["scrape_routes"](conn, airports)
-
-        else:
-            airports = al["scrape_airports"](conn)
-            if airports:
-                al["scrape_routes"](conn, airports)
-                al["scrape_schedules"](conn, limit=args.schedule_limit)
+            elif args.fares_only:
+                airports = [r[0] for r in conn.execute("SELECT iata_code FROM airports")]
+                if not airports:
+                    log.error("No airports found. Run full scrape or --airports-only first.")
+                    sys.exit(1)
                 al["scrape_fares"](conn, airports, limit=args.fare_limit)
+
+            elif args.schedules_only:
+                kwargs = {"limit": args.schedule_limit}
+                if args.refresh_days is not None:
+                    kwargs["days_fresh"] = args.refresh_days
+                if args.workers:
+                    kwargs["workers"] = args.workers
+                al["scrape_schedules"](conn, **kwargs)
+
+            elif args.airports_only:
+                airports = al["scrape_airports"](conn)
+                if airports:
+                    al["scrape_routes"](conn, airports)
+
+            else:
+                airports = al["scrape_airports"](conn)
+                if airports:
+                    al["scrape_routes"](conn, airports)
+                    al["scrape_schedules"](conn, limit=args.schedule_limit)
+                    al["scrape_fares"](conn, airports, limit=args.fare_limit)
+        except Exception as exc:
+            success = False
+            error   = str(exc)
+            log.error("[%s] Scrape failed: %s", code, exc)
+        finally:
+            after = get_db_counts(conn)
+            send_telegram(build_airline_message(code, success, error, before, after))
 
 
 def main():
