@@ -8,10 +8,10 @@ Discovery priority:
   1. CLI override / WIZZAIR_API_URL env var
   2. Previously successful URLs from DB (sorted by last success, newest first)
   3. Direct HTTP fetch of wizzair.com homepage (works with PROXY_URL)
-  4. LLM with web access via OpenRouter (if OPENROUTER_API_KEY is set)
 
-Every URL that succeeds or fails is tracked in the wizzair_api_urls table
-so the system learns and self-improves over time.
+All traffic is routed through PROXY_URL when set (needed for servers
+blocked by Wizzair's bot protection). Successful/failed URLs are
+tracked in the wizzair_api_urls table as a priority queue.
 """
 
 import logging
@@ -22,7 +22,7 @@ import time
 
 import requests
 
-from src.config import MAX_RETRIES, RETRY_BACKOFF, WIZZAIR_API_URL, PROXY_URL, OPENROUTER_API_KEY
+from src.config import MAX_RETRIES, RETRY_BACKOFF, WIZZAIR_API_URL, PROXY_URL
 
 log = logging.getLogger("scraper")
 
@@ -169,81 +169,6 @@ def _discover_from_homepage():
     return None
 
 
-_OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-
-_LLM_ATTEMPTS = [
-    {
-        "model": "perplexity/sonar",
-        "prompt": (
-            "What is the current Wizzair (wizzair.com) backend API base URL? "
-            "It is hosted at be.wizzair.com with a versioned path like "
-            "https://be.wizzair.com/23.1.0/Api (the version number changes). "
-            "Search for the latest version used by Wizzair scrapers or found "
-            "in the wizzair.com page source. "
-            "Reply with ONLY the full URL, nothing else."
-        ),
-        "extra": {},
-    },
-    {
-        "model": "google/gemini-2.0-flash-001:online",
-        "prompt": (
-            "Search the web for: wizzair.com apiUrl be.wizzair.com current version\n\n"
-            "The Wizzair flight search website embeds an API URL in its JavaScript. "
-            "It looks like https://be.wizzair.com/XX.Y.Z/Api where XX.Y.Z is a "
-            "version that changes every few weeks. "
-            "Find the most recent version number mentioned anywhere online and "
-            "reply with ONLY the full URL, nothing else."
-        ),
-        "extra": {"plugins": [{"id": "web", "max_results": 5}]},
-    },
-]
-
-_URL_PATTERN = re.compile(r"https?://be\.wizzair\.com/[\d.]+/Api")
-
-
-def _discover_via_llm():
-    """Try multiple LLM models with web search to find the Wizzair API URL."""
-    if not OPENROUTER_API_KEY:
-        return None
-
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    for attempt in _LLM_ATTEMPTS:
-        model = attempt["model"]
-        log.info("[W6] Attempting API discovery via LLM (%s) ...", model)
-        try:
-            body = {
-                "model": model,
-                "messages": [{"role": "user", "content": attempt["prompt"]}],
-                "temperature": 0,
-                "max_tokens": 200,
-                **attempt["extra"],
-            }
-            resp = requests.post(
-                _OPENROUTER_URL, headers=headers, json=body, timeout=60,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-            content = data["choices"][0]["message"]["content"].strip()
-            log.info("[W6] LLM (%s) response: %s", model, content)
-
-            match = _URL_PATTERN.search(content)
-            if match:
-                url = match.group(0)
-                log.info("[W6] LLM discovered API URL: %s", url)
-                return url
-
-            log.warning("[W6] LLM (%s) response did not contain a valid API URL", model)
-
-        except Exception as exc:
-            log.warning("[W6] LLM (%s) failed: %s", model, exc)
-
-    return None
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -320,13 +245,6 @@ class WizzairSession:
             if hp_url:
                 self._api_base = hp_url
                 _record_success(hp_url, source="homepage")
-
-        # --- Step 3: try LLM ---
-        if self._api_base is None:
-            llm_url = _discover_via_llm()
-            if llm_url:
-                self._api_base = llm_url
-                _record_success(llm_url, source="llm")
 
         # --- Give up ---
         if self._api_base is None:
