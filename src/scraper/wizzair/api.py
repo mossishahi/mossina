@@ -4,8 +4,14 @@ The Wizzair backend lives at be.wizzair.com under a version path that
 changes regularly (e.g. /27.45.0/Api). The version is embedded in the
 main website's JavaScript and must be extracted at runtime.
 
-Provides both a stateless WizzairSession class for parallel scraping
-and legacy module-level functions for simple single-threaded use.
+Discovery priority:
+  1. CLI override / WIZZAIR_API_URL env var
+  2. Previously successful URLs from DB (sorted by last success, newest first)
+  3. Direct HTTP fetch of wizzair.com homepage (works with PROXY_URL)
+  4. LLM with web access via OpenRouter (if OPENROUTER_API_KEY is set)
+
+Every URL that succeeds or fails is tracked in the wizzair_api_urls table
+so the system learns and self-improves over time.
 """
 
 import logging
@@ -16,7 +22,7 @@ import time
 
 import requests
 
-from src.config import MAX_RETRIES, RETRY_BACKOFF
+from src.config import MAX_RETRIES, RETRY_BACKOFF, WIZZAIR_API_URL, PROXY_URL, OPENROUTER_API_KEY
 
 log = logging.getLogger("scraper")
 
@@ -41,6 +47,207 @@ _throttle_lock = threading.Lock()
 _last_request_time = 0.0
 _MIN_INTERVAL = 0.5
 
+_override_api_url = ""
+_db_conn = None
+
+
+def set_api_url(url):
+    """Allow callers (e.g. CLI) to set the Wizzair API URL at runtime."""
+    global _override_api_url
+    _override_api_url = url.rstrip("/") if url else ""
+    log.info("[W6] Using provided API URL: %s", _override_api_url)
+
+
+def set_db(conn):
+    """Inject the shared DB connection so api.py can read/write the URL queue."""
+    global _db_conn
+    _db_conn = conn
+
+
+# ---------------------------------------------------------------------------
+# Priority-queue URL store (backed by wizzair_api_urls table)
+# ---------------------------------------------------------------------------
+
+def _load_urls_from_db():
+    """Return known API URLs sorted by last_success DESC (best first)."""
+    if _db_conn is None:
+        return []
+    try:
+        rows = _db_conn.execute(
+            "SELECT url FROM wizzair_api_urls "
+            "ORDER BY last_success DESC NULLS LAST, created_at DESC"
+        ).fetchall()
+        return [r[0] for r in rows]
+    except Exception:
+        return []
+
+
+def _record_success(url, source="homepage"):
+    """Mark a URL as working; insert if new, bump last_success if existing."""
+    if _db_conn is None:
+        return
+    try:
+        _db_conn.execute(
+            """INSERT INTO wizzair_api_urls (url, source, last_success, success_count)
+               VALUES (?, ?, datetime('now'), 1)
+               ON CONFLICT(url) DO UPDATE SET
+                   last_success  = datetime('now'),
+                   success_count = success_count + 1""",
+            (url, source),
+        )
+        _db_conn.commit()
+    except Exception as exc:
+        log.debug("[W6] Could not record URL success: %s", exc)
+
+
+def _record_failure(url):
+    """Mark a URL as failing; insert if new, bump last_failure if existing."""
+    if _db_conn is None:
+        return
+    try:
+        _db_conn.execute(
+            """INSERT INTO wizzair_api_urls (url, source, last_failure, failure_count)
+               VALUES (?, 'unknown', datetime('now'), 1)
+               ON CONFLICT(url) DO UPDATE SET
+                   last_failure  = datetime('now'),
+                   failure_count = failure_count + 1""",
+            (url,),
+        )
+        _db_conn.commit()
+    except Exception as exc:
+        log.debug("[W6] Could not record URL failure: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# URL health check
+# ---------------------------------------------------------------------------
+
+_HEALTH_PATH = "asset/map?languageCode=en-gb"
+
+
+def _get_proxies():
+    """Return proxy dict for requests if PROXY_URL is configured."""
+    if not PROXY_URL:
+        return None
+    return {"http": PROXY_URL, "https": PROXY_URL}
+
+
+def _probe_url(url):
+    """Quick GET to verify an API base URL is alive. Returns True on 200."""
+    try:
+        full = f"{url.rstrip('/')}/{_HEALTH_PATH}"
+        resp = requests.get(full, headers=_HEADERS, timeout=8, proxies=_get_proxies())
+        return resp.status_code == 200
+    except requests.RequestException:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Discovery sources
+# ---------------------------------------------------------------------------
+
+def _discover_from_homepage():
+    """Try to extract apiUrl from the wizzair.com homepage HTML."""
+    html_headers = {
+        "User-Agent": _HEADERS["User-Agent"],
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-GB,en;q=0.9",
+    }
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            resp = requests.get(_HOMEPAGE_URL, headers=html_headers, timeout=30,
+                                proxies=_get_proxies())
+            resp.raise_for_status()
+            match = re.search(r'"apiUrl"\s*:\s*"([^"]+)"', resp.text)
+            if match:
+                return match.group(1).replace("\\u002F", "/")
+            log.warning("[W6] apiUrl not found in HTML (attempt %d/%d)", attempt, MAX_RETRIES)
+        except requests.RequestException as exc:
+            log.warning("[W6] Homepage fetch failed: %s (attempt %d/%d)", exc, attempt, MAX_RETRIES)
+        if attempt < MAX_RETRIES:
+            time.sleep(RETRY_BACKOFF * attempt)
+    return None
+
+
+_OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+_LLM_ATTEMPTS = [
+    {
+        "model": "perplexity/sonar",
+        "prompt": (
+            "What is the current Wizzair (wizzair.com) backend API base URL? "
+            "It is hosted at be.wizzair.com with a versioned path like "
+            "https://be.wizzair.com/23.1.0/Api (the version number changes). "
+            "Search for the latest version used by Wizzair scrapers or found "
+            "in the wizzair.com page source. "
+            "Reply with ONLY the full URL, nothing else."
+        ),
+        "extra": {},
+    },
+    {
+        "model": "google/gemini-2.0-flash-001:online",
+        "prompt": (
+            "Search the web for: wizzair.com apiUrl be.wizzair.com current version\n\n"
+            "The Wizzair flight search website embeds an API URL in its JavaScript. "
+            "It looks like https://be.wizzair.com/XX.Y.Z/Api where XX.Y.Z is a "
+            "version that changes every few weeks. "
+            "Find the most recent version number mentioned anywhere online and "
+            "reply with ONLY the full URL, nothing else."
+        ),
+        "extra": {"plugins": [{"id": "web", "max_results": 5}]},
+    },
+]
+
+_URL_PATTERN = re.compile(r"https?://be\.wizzair\.com/[\d.]+/Api")
+
+
+def _discover_via_llm():
+    """Try multiple LLM models with web search to find the Wizzair API URL."""
+    if not OPENROUTER_API_KEY:
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    for attempt in _LLM_ATTEMPTS:
+        model = attempt["model"]
+        log.info("[W6] Attempting API discovery via LLM (%s) ...", model)
+        try:
+            body = {
+                "model": model,
+                "messages": [{"role": "user", "content": attempt["prompt"]}],
+                "temperature": 0,
+                "max_tokens": 200,
+                **attempt["extra"],
+            }
+            resp = requests.post(
+                _OPENROUTER_URL, headers=headers, json=body, timeout=60,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            content = data["choices"][0]["message"]["content"].strip()
+            log.info("[W6] LLM (%s) response: %s", model, content)
+
+            match = _URL_PATTERN.search(content)
+            if match:
+                url = match.group(0)
+                log.info("[W6] LLM discovered API URL: %s", url)
+                return url
+
+            log.warning("[W6] LLM (%s) response did not contain a valid API URL", model)
+
+        except Exception as exc:
+            log.warning("[W6] LLM (%s) failed: %s", model, exc)
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _interruptible_sleep(seconds, stop_event=None):
     if stop_event is None:
@@ -60,6 +267,10 @@ def _throttle(stop_event=None):
         _last_request_time = time.time()
 
 
+# ---------------------------------------------------------------------------
+# Session
+# ---------------------------------------------------------------------------
+
 class WizzairSession:
     """Independent Wizzair API session for thread-safe parallel use.
 
@@ -70,30 +281,61 @@ class WizzairSession:
     def __init__(self, worker_id=0, shared_api_base=None, stop_event=None):
         self.worker_id = worker_id
         self._session = None
-        self._api_base = shared_api_base
+        self._api_base = shared_api_base or _override_api_url or WIZZAIR_API_URL or None
         self._stop = stop_event
 
     def _ensure_session(self):
         if self._session is None:
             self._session = requests.Session()
             self._session.headers.update(_HEADERS)
+            proxies = _get_proxies()
+            if proxies:
+                self._session.proxies.update(proxies)
 
     def _reset(self):
         self._session = None
         self._api_base = None
 
     def _discover_api(self):
-        self._ensure_session()
-        resp = self._session.get(
-            _HOMEPAGE_URL, headers={"Accept": "text/html"}, timeout=30
-        )
-        resp.raise_for_status()
-        match = re.search(r'"apiUrl"\s*:\s*"([^"]+)"', resp.text)
-        if match:
-            self._api_base = match.group(1).replace("\\u002F", "/")
+        # --- Step 1: try known URLs from DB, best first ---
+        cached = _load_urls_from_db()
+        if cached:
+            log.info("[W6-w%d] Trying %d known API URL(s) ...", self.worker_id, len(cached))
+        for url in cached:
+            if self._stopped():
+                break
+            if _probe_url(url):
+                log.info("[W6-w%d] Cached URL works: %s", self.worker_id, url)
+                self._api_base = url
+                _record_success(url)
+                break
+            else:
+                log.info("[W6-w%d] Cached URL failed: %s", self.worker_id, url)
+                _record_failure(url)
+
+        # --- Step 2: try homepage scrape ---
         if self._api_base is None:
-            raise RuntimeError("Could not discover Wizzair API URL")
-        log.debug("[W6-w%d] API base: %s", self.worker_id, self._api_base)
+            log.info("[W6-w%d] Trying homepage discovery ...", self.worker_id)
+            hp_url = _discover_from_homepage()
+            if hp_url:
+                self._api_base = hp_url
+                _record_success(hp_url, source="homepage")
+
+        # --- Step 3: try LLM ---
+        if self._api_base is None:
+            llm_url = _discover_via_llm()
+            if llm_url:
+                self._api_base = llm_url
+                _record_success(llm_url, source="llm")
+
+        # --- Give up ---
+        if self._api_base is None:
+            raise RuntimeError(
+                "Could not discover Wizzair API URL. "
+                "The site likely blocked this server. Set WIZZAIR_API_URL env var or "
+                "pass --wizzair-api-url (run on your laptop to discover it)."
+            )
+        log.info("[W6-w%d] API base: %s", self.worker_id, self._api_base)
 
     def _base(self):
         if self._api_base is None:
