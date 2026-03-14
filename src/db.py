@@ -71,6 +71,16 @@ CREATE TABLE IF NOT EXISTS fares (
     FOREIGN KEY (destination) REFERENCES airports(iata_code)
 );
 
+CREATE TABLE IF NOT EXISTS wizzair_api_urls (
+    url             TEXT PRIMARY KEY,
+    source          TEXT NOT NULL DEFAULT 'homepage',
+    last_success    TEXT,
+    last_failure    TEXT,
+    success_count   INTEGER DEFAULT 0,
+    failure_count   INTEGER DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS api_fetch_log (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     airline         TEXT NOT NULL,
