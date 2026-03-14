@@ -89,7 +89,22 @@ shared one:
 ```bash
 python scrape.py                          # full scrape (all airlines)
 python scrape.py --airline FR             # Ryanair only
+python scrape.py --airline W6             # Wizz Air only
 python scrape.py --availability-only --airline FR --origins FMM,NUE
 ```
 
 See `python scrape.py --help` for all options.
+
+#### Wizz Air proxy setup
+
+Wizz Air's API is behind bot protection that blocks datacenter IPs.
+If you're running the scraper on a server (not your laptop), set a
+residential proxy via the `PROXY_URL` environment variable:
+
+```bash
+export PROXY_URL="http://user:pass@proxy-host:port"
+python scrape.py --airline W6
+```
+
+Any HTTP/SOCKS5 residential proxy works. The proxy is only used for
+Wizz Air traffic — Ryanair requests go direct.
