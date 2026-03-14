@@ -21,7 +21,12 @@ def scrape_airports(conn):
     data = wizzair_get("/asset/map?languageCode=en-gb")
 
     if not data or "cities" not in data:
-        log.error("[%s] Could not fetch map data.", AIRLINE)
+        log.warning("[%s] Direct API fetch failed. Trying LLM fallback ...", AIRLINE)
+        from src.scraper.wizzair.llm_fallback import fetch_map_via_llm
+        data = fetch_map_via_llm()
+
+    if not data or "cities" not in data:
+        log.error("[%s] Could not fetch map data (all methods failed).", AIRLINE)
         return []
 
     cities = data["cities"]
