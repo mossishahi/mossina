@@ -128,7 +128,10 @@ _HEALTH_PATH = "asset/map?languageCode=en-gb"
 def _get_proxies():
     """Return proxy dict for requests if PROXY_URL is configured."""
     if not PROXY_URL:
+        log.debug("[W6] No proxy configured — requests go direct")
         return None
+    host = PROXY_URL.split("@")[-1] if "@" in PROXY_URL else PROXY_URL
+    log.info("[W6] Using proxy: %s", host)
     return {"http": PROXY_URL, "https": PROXY_URL}
 
 
