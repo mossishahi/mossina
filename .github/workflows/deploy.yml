@@ -85,11 +85,12 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GH_PAT: ${{ secrets.GH_PAT }}
+          PROXY_URL: ${{ secrets.PROXY_URL }}
         with:
           host: ${{ secrets.DO_HOST }}
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
-          envs: TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID,GH_PAT
+          envs: TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID,GH_PAT,PROXY_URL
           script: |
             set -e
 
@@ -107,6 +108,7 @@ jobs:
             cat > /opt/mossina/.env << ENV
             TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
             TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+            PROXY_URL=${PROXY_URL}
             ENV
             chmod 600 /opt/mossina/.env
             echo "    .env written"
