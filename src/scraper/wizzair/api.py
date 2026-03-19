@@ -45,7 +45,7 @@ _POST_DELAY = 0.4
 
 _throttle_lock = threading.Lock()
 _last_request_time = 0.0
-_MIN_INTERVAL = 0.5
+_MIN_INTERVAL = 3.0 if PROXY_URL else 0.5
 
 _override_api_url = ""
 _db_conn = None
@@ -139,7 +139,12 @@ def _probe_url(url):
     """Quick GET to verify an API base URL is alive. Returns True on 200."""
     try:
         full = f"{url.rstrip('/')}/{_HEALTH_PATH}"
-        resp = requests.get(full, headers=_HEADERS, timeout=8, proxies=_get_proxies())
+        with requests.Session() as s:
+            s.headers.update(_HEADERS)
+            proxies = _get_proxies()
+            if proxies:
+                s.proxies.update(proxies)
+            resp = s.get(full, timeout=15)
         return resp.status_code == 200
     except requests.RequestException:
         return False
@@ -285,13 +290,13 @@ class WizzairSession:
                 _throttle(self._stop)
                 if self._stopped():
                     return None
-                resp = sess.post(url, json=payload, timeout=10)
+                resp = sess.post(url, json=payload, timeout=20)
 
                 if resp.status_code == 200:
                     self._sync_token()
                     return resp.json()
 
-                if resp.status_code in (429, 503):
+                if resp.status_code in (429, 502, 503):
                     jitter = random.uniform(0, 5)
                     wait = 8 * attempt + jitter
                     log.warning(
@@ -324,6 +329,11 @@ class WizzairSession:
                     "[W6-w%d] POST error: %s (attempt %d)",
                     self.worker_id, exc, attempt,
                 )
+                self._session = None
+                _interruptible_sleep(RETRY_BACKOFF * attempt + random.uniform(2, 8), self._stop)
+                self._ensure_session()
+                sess = self._session
+                continue
 
             if attempt < _POST_RETRIES:
                 _interruptible_sleep(RETRY_BACKOFF * attempt, self._stop)

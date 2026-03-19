@@ -1,0 +1,60 @@
+name: Scrape Wizz Air
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # daily at 02:00 UTC
+  workflow_dispatch:       # manual trigger from GitHub UI
+
+jobs:
+  scrape:
+    name: Scrape W6
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Download production database
+        run: |
+          scp -i ~/.ssh/deploy_key \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/lib/docker/volumes/mossina_mossina_data/_data/flights.db \
+            data/flights.db
+
+      - name: Scrape Wizz Air
+        run: python scrape.py --airline W6
+
+      - name: Upload updated database
+        run: |
+          scp -i ~/.ssh/deploy_key \
+            data/flights.db \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/lib/docker/volumes/mossina_mossina_data/_data/flights.db
+
+      - name: Notify Telegram
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            MSG="Wizz Air scrape completed successfully"
+          else
+            MSG="Wizz Air scrape failed — check Actions log"
+          fi
+          curl -sS -X POST \
+            "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{\"chat_id\": \"${{ secrets.TELEGRAM_CHAT_ID }}\", \"text\": \"$MSG\"}" \
+            > /dev/null 2>&1 || true

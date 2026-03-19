@@ -24,10 +24,12 @@ from src.scraper.wizzair.api import WizzairSession
 
 log = logging.getLogger("scraper")
 
+from src.config import PROXY_URL
+
 AIRLINE = "W6"
 MAX_WINDOW_DAYS = 42
 DEFAULT_FRESH_DAYS = 7
-DEFAULT_WORKERS = 4
+DEFAULT_WORKERS = 1 if PROXY_URL else 4
 
 _SENTINEL = None
 
