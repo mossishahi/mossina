@@ -224,14 +224,16 @@ class WizzairSession:
             proxies = _get_proxies()
             if proxies:
                 self._session.proxies.update(proxies)
-            try:
-                self._session.get(_HOMEPAGE_URL, headers={
-                    "Accept": "text/html",
-                    "User-Agent": _HEADERS["User-Agent"],
-                }, timeout=15)
-                self._sync_token()
-            except requests.RequestException:
-                pass
+            from src.scraper.wizzair.browser import inject_session
+            if not inject_session(self._session):
+                try:
+                    self._session.get(_HOMEPAGE_URL, headers={
+                        "Accept": "text/html",
+                        "User-Agent": _HEADERS["User-Agent"],
+                    }, timeout=15)
+                    self._sync_token()
+                except requests.RequestException:
+                    pass
 
     def _reset(self):
         self._session = None

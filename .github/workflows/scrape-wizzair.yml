@@ -37,8 +37,10 @@ jobs:
             ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/lib/docker/volumes/mossina_mossina_data/_data/flights.db \
             data/flights.db
 
-      - name: Scrape Wizz Air airports and routes
-        run: python scrape.py --airline W6 --airports-only
+      - name: Scrape Wizz Air
+        run: python scrape.py --airline W6
+        env:
+          FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
 
       - name: Upload updated database
         run: |
