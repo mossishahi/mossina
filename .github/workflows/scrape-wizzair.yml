@@ -32,6 +32,7 @@ jobs:
 
       - name: Download production database
         run: |
+          mkdir -p data
           scp -i ~/.ssh/deploy_key \
             ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/lib/docker/volumes/mossina_mossina_data/_data/flights.db \
             data/flights.db
