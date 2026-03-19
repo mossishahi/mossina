@@ -20,6 +20,7 @@ _WIZZAIR_URL = "https://wizzair.com/en-gb"
 
 _cookies = None
 _csrf_token = None
+_bootstrap_failed = False
 
 
 def _get_api_key():
@@ -30,11 +31,14 @@ def bootstrap():
     """Load wizzair.com via Firecrawl, extract cookies and CSRF token.
 
     Returns (cookies_dict, csrf_token) or (None, None) on failure.
+    Caches both success and failure to avoid repeated API calls.
     """
-    global _cookies, _csrf_token
+    global _cookies, _csrf_token, _bootstrap_failed
 
     if _cookies is not None:
         return _cookies, _csrf_token
+    if _bootstrap_failed:
+        return None, None
 
     api_key = _get_api_key()
     if not api_key:
@@ -94,6 +98,7 @@ def bootstrap():
 
     except Exception as exc:
         log.warning("[W6-firecrawl] Bootstrap failed: %s", exc)
+        _bootstrap_failed = True
         return None, None
 
 
@@ -111,6 +116,7 @@ def inject_session(session):
 
 def reset():
     """Force re-bootstrap on next call."""
-    global _cookies, _csrf_token
+    global _cookies, _csrf_token, _bootstrap_failed
     _cookies = None
     _csrf_token = None
+    _bootstrap_failed = False
