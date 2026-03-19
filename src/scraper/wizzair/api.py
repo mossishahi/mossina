@@ -45,7 +45,7 @@ _POST_DELAY = 0.4
 
 _throttle_lock = threading.Lock()
 _last_request_time = 0.0
-_MIN_INTERVAL = 3.0 if PROXY_URL else 0.5
+_MIN_INTERVAL = 2.0
 
 _override_api_url = ""
 _db_conn = None
