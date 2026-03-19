@@ -37,10 +37,8 @@ jobs:
             ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/lib/docker/volumes/mossina_mossina_data/_data/flights.db \
             data/flights.db
 
-      - name: Scrape Wizz Air
-        run: python scrape.py --airline W6
-        env:
-          PROXY_URL: ${{ secrets.PROXY_URL }}
+      - name: Scrape Wizz Air airports and routes
+        run: python scrape.py --airline W6 --airports-only
 
       - name: Upload updated database
         run: |
