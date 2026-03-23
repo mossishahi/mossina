@@ -11,7 +11,10 @@ API: /api/booking/v4/en-gb/availability
 """
 
 import logging
+import queue
+import threading
 import time as _time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 from src.api import api_get
@@ -27,6 +30,8 @@ AVAILABILITY_URL = (
 
 FLEX_DAYS = 6  # 0-indexed; max accepted by the API (covers 7 days per call)
 DEFAULT_FRESH_DAYS = 1
+DEFAULT_WORKERS = 6
+_SENTINEL = None
 
 
 def _stale_routes(conn, origins, days_fresh):
@@ -54,8 +59,103 @@ def _stale_routes(conn, origins, days_fresh):
     return conn.execute(query, params).fetchall()
 
 
+def _fetch_route(origin, dest, now, end_date, scraped_at, stop_event):
+    """Fetch all availability windows for one route. Returns list of fare tuples."""
+    fares = []
+    cursor = now
+    while cursor < end_date:
+        if stop_event and stop_event.is_set():
+            break
+        date_out = cursor.strftime("%Y-%m-%d")
+        data = api_get(AVAILABILITY_URL, delay=0.3, stop_event=stop_event, params={
+            "ADT": 1, "CHD": 0, "DateOut": date_out,
+            "Destination": dest, "FlexDaysOut": FLEX_DAYS,
+            "INF": 0, "IncludeConnectingFlights": "false",
+            "Origin": origin, "RoundTrip": "false",
+            "TEEN": 0, "ToUs": "AGREED",
+        })
+        if not data:
+            cursor += timedelta(days=FLEX_DAYS + 1)
+            continue
+
+        currency = data.get("currency", "EUR")
+        for trip in data.get("trips", []):
+            for date_entry in trip.get("dates", []):
+                for flight in date_entry.get("flights", []):
+                    reg = flight.get("regularFare")
+                    if not reg:
+                        continue
+                    price = None
+                    for f in reg.get("fares", []):
+                        if f.get("type") == "ADT":
+                            price = f.get("amount")
+                            break
+                    if price is None:
+                        continue
+                    fn = (flight.get("flightNumber") or "").replace(" ", "")
+                    times = flight.get("time", [])
+                    dep_dt = times[0] if len(times) > 0 else ""
+                    arr_dt = times[1] if len(times) > 1 else ""
+                    fares.append((origin, dest, AIRLINE, dep_dt, arr_dt,
+                                  price, currency, fn, scraped_at))
+        cursor += timedelta(days=FLEX_DAYS + 1)
+    return fares
+
+
+def _db_writer(conn, write_q, counters):
+    """Single-threaded DB writer consuming from the queue."""
+    while True:
+        item = write_q.get()
+        if item is _SENTINEL:
+            break
+        kind = item[0]
+        if kind == "_fares":
+            _, fare_rows = item
+            for row in fare_rows:
+                conn.execute(
+                    """INSERT OR REPLACE INTO fares
+                       (origin, destination, airline,
+                        departure_date, arrival_date,
+                        price, currency, flight_number, scraped_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", row)
+            counters["fares"] += len(fare_rows)
+        elif kind == "_log":
+            _, airline, origin, dest, endpoint, duration_ms = item
+            try:
+                log_api_fetch(conn, airline, origin, dest, endpoint, duration_ms)
+            except Exception:
+                pass
+        if counters["done"] % 20 == 0:
+            conn.commit()
+    conn.commit()
+
+
+def _worker(my_routes, now, end_date, scraped_at, write_q,
+            counters_lock, counters, stop_event, on_progress):
+    """Worker thread: HTTP only, pushes results to write_q."""
+    for origin, dest in my_routes:
+        if stop_event and stop_event.is_set():
+            break
+        route_t0 = _time.monotonic()
+        fares = _fetch_route(origin, dest, now, end_date, scraped_at, stop_event)
+        route_ms = (_time.monotonic() - route_t0) * 1000
+
+        if fares:
+            write_q.put(("_fares", fares))
+        write_q.put(("_log", AIRLINE, origin, dest, "availability", route_ms))
+
+        with counters_lock:
+            counters["done"] += 1
+            done, total, total_fares = counters["done"], counters["total"], counters["fares"]
+            if done % 50 == 0 or done == total:
+                log.info("[%s] Progress: %d/%d routes, %d fares collected",
+                         AIRLINE, done, total, total_fares)
+            if on_progress:
+                on_progress(done, total, total_fares, route_ms)
+
+
 def scrape_availability(conn, origins=None, limit=None, days_fresh=DEFAULT_FRESH_DAYS,
-                        on_progress=None, stop_event=None):
+                        on_progress=None, stop_event=None, workers=DEFAULT_WORKERS):
     """Fetch per-route daily fares for Ryanair routes over the next 3 months.
 
     Args:
@@ -65,12 +165,13 @@ def scrape_availability(conn, origins=None, limit=None, days_fresh=DEFAULT_FRESH
         on_progress:  optional callback ``fn(done, total, fares, route_ms)``
         stop_event:   a ``threading.Event``; when set the scraper saves
                       progress and returns early
+        workers:      number of parallel HTTP threads (default 6)
     """
     now = datetime.utcnow()
     scraped_at = now.isoformat()
 
     total_routes = conn.execute(
-        "SELECT COUNT(DISTINCT origin, destination) FROM routes WHERE airline = ?",
+        "SELECT COUNT(*) FROM (SELECT DISTINCT origin, destination FROM routes WHERE airline = ?)",
         (AIRLINE,)
     ).fetchone()[0]
 
@@ -96,100 +197,50 @@ def scrape_availability(conn, origins=None, limit=None, days_fresh=DEFAULT_FRESH
         routes = routes[:limit]
 
     today = now.strftime("%Y-%m-%d")
-    end_date = (now + timedelta(days=90))
+    end_date = now + timedelta(days=90)
+    n_workers = min(workers, len(routes))
 
     log.info(
-        "[%s] Fetching availability fares for %d/%d routes (%s to %s) ...",
-        AIRLINE, len(routes), total_routes, today, end_date.strftime("%Y-%m-%d"),
+        "[%s] Fetching availability fares for %d/%d routes (%s to %s), %d workers ...",
+        AIRLINE, len(routes), total_routes, today,
+        end_date.strftime("%Y-%m-%d"), n_workers,
     )
 
-    total = 0
-    stopped = False
-    for i, (origin, dest) in enumerate(routes, 1):
-        if stop_event and stop_event.is_set():
-            stopped = True
-            break
-        route_t0 = _time.monotonic()
-        cursor = now
-        while cursor < end_date:
-            if stop_event and stop_event.is_set():
-                break
-            date_out = cursor.strftime("%Y-%m-%d")
-            data = api_get(AVAILABILITY_URL, delay=0.3, stop_event=stop_event, params={
-                "ADT": 1,
-                "CHD": 0,
-                "DateOut": date_out,
-                "Destination": dest,
-                "FlexDaysOut": FLEX_DAYS,
-                "INF": 0,
-                "IncludeConnectingFlights": "false",
-                "Origin": origin,
-                "RoundTrip": "false",
-                "TEEN": 0,
-                "ToUs": "AGREED",
-            })
-            if not data:
-                cursor += timedelta(days=FLEX_DAYS + 1)
-                continue
+    t0 = _time.monotonic()
+    write_q = queue.Queue(maxsize=200)
+    counters_lock = threading.Lock()
+    counters = {"fares": 0, "done": 0, "total": len(routes)}
 
-            currency = data.get("currency", "EUR")
+    writer = threading.Thread(
+        target=_db_writer, args=(conn, write_q, counters), daemon=True)
+    writer.start()
 
-            for trip in data.get("trips", []):
-                for date_entry in trip.get("dates", []):
-                    for flight in date_entry.get("flights", []):
-                        reg = flight.get("regularFare")
-                        if not reg:
-                            continue
+    chunks = [routes[i::n_workers] for i in range(n_workers)]
 
-                        fares_list = reg.get("fares", [])
-                        price = None
-                        for f in fares_list:
-                            if f.get("type") == "ADT":
-                                price = f.get("amount")
-                                break
+    with ThreadPoolExecutor(max_workers=n_workers) as pool:
+        futures = [
+            pool.submit(_worker, chunks[i], now, end_date, scraped_at,
+                        write_q, counters_lock, counters, stop_event,
+                        on_progress)
+            for i in range(n_workers)
+        ]
+        for f in as_completed(futures):
+            try:
+                f.result()
+            except Exception:
+                log.exception("[%s] Worker failed", AIRLINE)
 
-                        if price is None:
-                            continue
-
-                        fn = (flight.get("flightNumber") or "").replace(" ", "")
-                        times = flight.get("time", [])
-                        dep_dt = times[0] if len(times) > 0 else ""
-                        arr_dt = times[1] if len(times) > 1 else ""
-
-                        conn.execute(
-                            """INSERT OR REPLACE INTO fares
-                               (origin, destination, airline,
-                                departure_date, arrival_date,
-                                price, currency, flight_number, scraped_at)
-                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                            (origin, dest, AIRLINE,
-                             dep_dt, arr_dt,
-                             price, currency, fn, scraped_at),
-                        )
-                        total += 1
-
-            cursor += timedelta(days=FLEX_DAYS + 1)
-
-        route_ms = (_time.monotonic() - route_t0) * 1000
-        try:
-            log_api_fetch(conn, AIRLINE, origin, dest,
-                          "availability", route_ms)
-        except Exception:
-            pass
-
-        if on_progress:
-            on_progress(i, len(routes), total, route_ms)
-
-        if i % 20 == 0:
-            conn.commit()
-            log.info(
-                "[%s]   ... availability: %d/%d routes (%d fares)",
-                AIRLINE, i, len(routes), total,
-            )
-
+    write_q.put(_SENTINEL)
+    writer.join()
     conn.commit()
-    if stopped:
-        log.info("[%s] Stopped early after %d/%d routes (%d fares saved).",
-                 AIRLINE, i - 1, len(routes), total)
+
+    elapsed = _time.monotonic() - t0
+    done = counters["done"]
+    fares = counters["fares"]
+    elapsed_min = elapsed / 60
+    if stop_event and stop_event.is_set():
+        log.info("[%s] Stopped early after %d/%d routes (%d fares saved) in %.1f min.",
+                 AIRLINE, done, len(routes), fares, elapsed_min)
     else:
-        log.info("[%s] Stored %d availability fare entries.", AIRLINE, total)
+        log.info("[%s] DONE — %d routes, %d fares stored in %.1f min.",
+                 AIRLINE, done, fares, elapsed_min)
