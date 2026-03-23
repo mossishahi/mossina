@@ -17,7 +17,7 @@ import argparse
 import sys
 
 from src.config import DB_PATH, setup_logging
-from src.db import connect, table_counts, airline_summary
+from src.db import connect, table_counts, airline_summary, snapshot_prices
 from src.scraper import get_airline, list_airlines, AIRLINES
 
 log = setup_logging()
@@ -176,6 +176,10 @@ def main():
             do_update(conn, airline_codes)
         else:
             run_full_scrape(conn, airline_codes, args)
+
+        saved = snapshot_prices(conn)
+        if saved:
+            log.info("Saved %d price snapshots to history.", saved)
 
         print_summary(conn, db_path)
 

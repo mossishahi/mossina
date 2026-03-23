@@ -71,6 +71,22 @@ CREATE TABLE IF NOT EXISTS fares (
     FOREIGN KEY (destination) REFERENCES airports(iata_code)
 );
 
+CREATE TABLE IF NOT EXISTS price_history (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    origin          TEXT NOT NULL,
+    destination     TEXT NOT NULL,
+    airline         TEXT NOT NULL DEFAULT 'FR',
+    departure_date  TEXT,
+    price           REAL,
+    currency        TEXT,
+    flight_number   TEXT NOT NULL DEFAULT '',
+    scraped_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_history_route ON price_history(origin, destination, airline);
+CREATE INDEX IF NOT EXISTS idx_price_history_date ON price_history(departure_date);
+CREATE INDEX IF NOT EXISTS idx_price_history_scraped ON price_history(scraped_at);
+
 CREATE TABLE IF NOT EXISTS wizzair_api_urls (
     url             TEXT PRIMARY KEY,
     source          TEXT NOT NULL DEFAULT 'homepage',
@@ -224,7 +240,7 @@ def _migrate(conn):
 
 
 def table_counts(conn):
-    tables = ["countries", "airports", "routes", "schedules", "fares"]
+    tables = ["countries", "airports", "routes", "schedules", "fares", "price_history"]
     counts = {}
     for t in tables:
         try:
@@ -240,6 +256,21 @@ def airline_summary(conn):
         "SELECT airline, COUNT(*) FROM routes GROUP BY airline"
     ).fetchall()
     return {code: cnt for code, cnt in rows}
+
+
+def snapshot_prices(conn):
+    """Copy current fares into price_history for historical tracking."""
+    cursor = conn.execute(
+        """INSERT INTO price_history
+           (origin, destination, airline, departure_date, price,
+            currency, flight_number, scraped_at)
+           SELECT origin, destination, airline, departure_date, price,
+                  currency, flight_number, scraped_at
+           FROM fares
+           WHERE scraped_at >= datetime('now', '-1 day')"""
+    )
+    conn.commit()
+    return cursor.rowcount
 
 
 def log_api_fetch(conn, airline, origin, destination, endpoint,
