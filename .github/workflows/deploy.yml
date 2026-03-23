@@ -134,8 +134,8 @@ jobs:
             echo "==> Syncing dev directory..."
             REPO_URL="https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
             if [ -d ~/mossina-dev/.git ]; then
-              git -C ~/mossina-dev reset --hard
-              git -C ~/mossina-dev pull
+              git -C ~/mossina-dev fetch origin
+              git -C ~/mossina-dev reset --hard origin/production
             else
               git clone "$REPO_URL" ~/mossina-dev
             fi
