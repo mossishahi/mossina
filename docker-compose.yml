@@ -36,6 +36,17 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+  # ─── DB Shell ────────────────────────────────────────────────────────────────
+  # Always-on container for querying the SQLite database.
+  # Usage: docker exec -it mossina_db sqlite3 /app/data/flights.db
+  db:
+    image: alpine:latest
+    container_name: mossina_db
+    restart: unless-stopped
+    command: sh -c "apk add --no-cache sqlite && tail -f /dev/null"
+    volumes:
+      - mossina_data:/app/data
+
   # ─── Web UI ──────────────────────────────────────────────────────────────────
   # Serves the generated HTML visualisation at http://YOUR_IP:8080
   # Starts automatically on every deploy and restarts if the server reboots.
