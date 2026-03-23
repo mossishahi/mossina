@@ -120,6 +120,9 @@ def run_full_scrape(conn, airline_codes, args):
                 al["scrape_routes"](conn, airports)
                 al["scrape_schedules"](conn, limit=args.schedule_limit)
                 al["scrape_fares"](conn, airports, limit=args.fare_limit)
+                scrape_avail = al.get("scrape_availability")
+                if scrape_avail:
+                    scrape_avail(conn, limit=args.fare_limit)
 
 
 def main():
