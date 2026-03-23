@@ -170,6 +170,23 @@ def _assign_colors(airports):
     return color_map
 
 
+def _get_last_updated(conn):
+    """Return a human-readable string with the last scrape time per airline."""
+    parts = []
+    for code, name in [("FR", "Ryanair"), ("W6", "Wizz Air")]:
+        row = conn.execute(
+            "SELECT MAX(scraped_at) FROM fares WHERE airline = ?", (code,)
+        ).fetchone()
+        ts = row[0] if row and row[0] else None
+        if ts:
+            parts.append(f"{name}: {ts[:16].replace('T', ' ')}")
+    if not parts:
+        row = conn.execute("SELECT MAX(last_seen) FROM routes").fetchone()
+        ts = row[0] if row and row[0] else "unknown"
+        return ts[:16].replace("T", " ") if ts != "unknown" else ts
+    return " &middot; ".join(parts)
+
+
 def build_network_html(conn, output_path):
     """Build a standalone interactive HTML file with the route network."""
     airports, routes, degree, avail, route_airlines, fare_data = _load_graph_data(conn)
@@ -238,6 +255,8 @@ def build_network_html(conn, output_path):
         cnt = sum(1 for e in edges_js if code in e.get("airlines", []))
         airline_meta[code] = {"name": info["name"], "color": info["color"], "routes": cnt}
 
+    last_updated = _get_last_updated(conn)
+
     html = _TEMPLATE.replace("__NODES__", json.dumps(nodes_js))
     html = html.replace("__EDGES__", json.dumps(edges_js))
     html = html.replace("__LEGEND__", json.dumps(country_legend))
@@ -246,6 +265,7 @@ def build_network_html(conn, output_path):
     html = html.replace("__AVAIL__", json.dumps(avail, separators=(",", ":")))
     html = html.replace("__AIRLINE_META__", json.dumps(airline_meta))
     html = html.replace("__FARE_DATA__", json.dumps(fare_data, separators=(",", ":")))
+    html = html.replace("__LAST_UPDATED__", last_updated)
 
     if output_path:
         output_path = Path(output_path)
@@ -706,6 +726,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div id="panel-top">
       <h2>Flight Route Network</h2>
       <div class="stat">Airports: <b>__NODE_COUNT__</b> &middot; Routes: <b>__EDGE_COUNT__</b></div>
+      <div class="stat" style="font-size:10px;color:#8b949e;margin-top:2px;">Last update: __LAST_UPDATED__</div>
       <div id="status">Select cities to show routes</div>
       <div id="search-wrap">
         <input id="search" type="text" placeholder="Search airport..." autocomplete="off">
@@ -764,9 +785,13 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <input type="checkbox" id="pf-only-selected" checked style="accent-color:#1f6feb;">
       Only selected cities in path
     </label>
+    <label id="pf-roundtrip-label" style="display:none;align-items:center;gap:4px;font-size:11px;color:#8b949e;margin-bottom:6px;cursor:pointer;">
+      <input type="checkbox" id="pf-roundtrip" style="accent-color:#1f6feb;">
+      Include round trips (A→B→A)
+    </label>
     <div id="pf-controls">
       <span>Length:</span>
-      <input type="number" id="pf-n" placeholder="all" min="3" max="8" oninput="if(pfActive)renderPfResults()">
+      <input type="number" id="pf-n" placeholder="all" min="2" max="8" oninput="if(pfActive)renderPfResults()">
       <button class="btn" onclick="try{runPathfinder()}catch(e){document.getElementById('pf-status').textContent='ERROR: '+e.message;console.error(e);}">Find</button>
       <button class="btn" onclick="clearPathfinder()">Clear</button>
     </div>
@@ -1632,7 +1657,8 @@ function runPathfinder() {
   if (_pfRunning) return;
   var isCycle = document.querySelector('input[name="pf-mode"]:checked').value === "cycles";
   var onlySelected = document.getElementById("pf-only-selected").checked;
-  var nList = isCycle ? [3, 4, 5, 6, 7, 8] : [1, 2, 3, 4, 5, 6, 7, 8];
+  var includeRoundTrips = isCycle && document.getElementById("pf-roundtrip").checked;
+  var nList = isCycle ? (includeRoundTrips ? [2, 3, 4, 5, 6, 7, 8] : [3, 4, 5, 6, 7, 8]) : [1, 2, 3, 4, 5, 6, 7, 8];
   var statusEl = document.getElementById("pf-status");
   var resultsEl = document.getElementById("pf-results");
   var progressEl = document.getElementById("pf-progress");
@@ -2162,6 +2188,7 @@ function showPfArcs(paths) {
   baseArcStroke = 0.4;
   applyZoomStroke();
   var arcs = [];
+  var seen = {};
   paths.forEach(function(path) {
     for (var i = 0; i < path.length - 1; i++) {
       var from = path[i], to = path[i + 1];
@@ -2169,13 +2196,17 @@ function showPfArcs(paths) {
       if (!f || !t) continue;
       var c = edgeAirlineColor(from, to);
       var al = edgeAirlineCode(from, to);
+      var key = from + "-" + to;
+      var rev = to + "-" + from;
+      var alt = seen[rev] ? 0.008 : undefined;
+      seen[key] = true;
       arcs.push({
         startLat: f.lat, startLng: f.lon,
         endLat: t.lat, endLng: t.lon,
-        color: c, alt: undefined,
+        color: c, alt: alt,
         fromIata: from, toIata: to, airline: al
       });
-      addArrowArcs(arcs, f.lat, f.lon, t.lat, t.lon, c, undefined, from, to, al);
+      addArrowArcs(arcs, f.lat, f.lon, t.lat, t.lon, c, alt, from, to, al);
     }
   });
   myGlobe.arcsData(arcs);
@@ -2198,6 +2229,15 @@ function clearPathfinder() {
   applyZoomStroke();
   refreshArcs();
 }
+
+function updateRoundTripVisibility() {
+  var isCycle = document.querySelector('input[name="pf-mode"]:checked').value === "cycles";
+  document.getElementById("pf-roundtrip-label").style.display = isCycle ? "flex" : "none";
+}
+document.querySelectorAll('input[name="pf-mode"]').forEach(function(r) {
+  r.addEventListener("change", updateRoundTripVisibility);
+});
+updateRoundTripVisibility();
 
 /* ---- Search ---- */
 var searchBox = document.getElementById("search");
