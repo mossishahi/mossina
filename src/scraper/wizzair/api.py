@@ -50,6 +50,8 @@ _MIN_INTERVAL = 1.0
 _override_api_url = ""
 _db_conn = None
 _scrapfly_key = ""
+_shared_session = None
+_session_lock = threading.Lock()
 
 
 def set_api_url(url):
@@ -259,32 +261,41 @@ class WizzairSession:
         self._use_scrapfly = bool(_get_scrapfly_key())
 
     def _ensure_session(self):
-        if self._session is None:
+        global _shared_session
+        if self._session is not None:
+            return
+        if self._use_scrapfly:
             self._session = requests.Session()
-            self._session.headers.update(_HEADERS)
+            return
+        with _session_lock:
+            if _shared_session is None:
+                _shared_session = requests.Session()
+                try:
+                    _shared_session.get(_HOMEPAGE_URL, headers={
+                        "Accept": "text/html,application/xhtml+xml,*/*",
+                        "User-Agent": _HEADERS["User-Agent"],
+                    }, timeout=15)
+                except requests.RequestException:
+                    pass
+                _shared_session.headers.update(_HEADERS)
+                token = _shared_session.cookies.get("RequestVerificationToken", "")
+                if token:
+                    _shared_session.headers["X-RequestVerificationToken"] = token
+            self._session = _shared_session
 
     def _discover_api(self):
         cached = _load_urls_from_db()
-        if cached:
-            log.info("[W6-w%d] Trying %d known API URL(s) ...", self.worker_id, len(cached))
-        for url in cached:
-            if self._stopped():
-                break
-            if _probe_url(url):
-                log.info("[W6-w%d] Cached URL works: %s", self.worker_id, url)
-                self._api_base = url
-                _record_success(url)
-                break
-            else:
-                log.info("[W6-w%d] Cached URL failed: %s", self.worker_id, url)
-                _record_failure(url)
 
-        if self._api_base is None:
-            log.info("[W6-w%d] Trying homepage discovery ...", self.worker_id)
-            hp_url = _discover_from_homepage()
-            if hp_url:
-                self._api_base = hp_url
-                _record_success(hp_url, source="homepage")
+        if cached:
+            self._api_base = cached[0]
+            log.info("[W6-w%d] Using cached URL: %s", self.worker_id, self._api_base)
+            return
+
+        log.info("[W6-w%d] Trying homepage discovery ...", self.worker_id)
+        hp_url = _discover_from_homepage()
+        if hp_url:
+            self._api_base = hp_url
+            _record_success(hp_url, source="homepage")
 
         if self._api_base is None:
             raise RuntimeError(
@@ -297,6 +308,12 @@ class WizzairSession:
         if self._api_base is None:
             self._discover_api()
         return self._api_base
+
+    def _sync_token(self):
+        if self._session:
+            token = self._session.cookies.get("RequestVerificationToken", "")
+            if token:
+                self._session.headers["X-RequestVerificationToken"] = token
 
     def _stopped(self):
         return self._stop is not None and self._stop.is_set()
@@ -322,9 +339,11 @@ class WizzairSession:
                     continue
 
                 self._ensure_session()
+                self._sync_token()
                 resp = self._session.post(url, json=payload, timeout=20)
 
                 if resp.status_code == 200:
+                    self._sync_token()
                     return resp.json()
                 if resp.status_code in (429, 502, 503):
                     wait = 8 * attempt + random.uniform(0, 5)
