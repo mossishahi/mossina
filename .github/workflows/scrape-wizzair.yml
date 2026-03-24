@@ -1,8 +1,8 @@
 name: Scrape Wizz Air
 
 on:
-  schedule:
-    - cron: "0 2 * * *"   # daily at 02:00 UTC
+  # schedule:
+  #   - cron: "0 2 * * *"   # daily at 02:00 UTC (disabled until ScrapFly plan active)
   workflow_dispatch:       # manual trigger from GitHub UI
 
 jobs:
