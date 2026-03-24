@@ -795,6 +795,19 @@ _TEMPLATE = r"""<!DOCTYPE html>
       <button class="btn" onclick="try{runPathfinder()}catch(e){document.getElementById('pf-status').textContent='ERROR: '+e.message;console.error(e);}">Find</button>
       <button class="btn" onclick="clearPathfinder()">Clear</button>
     </div>
+    <div id="pf-stay" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+      <span style="font-size:11px;color:#8b949e;">Stay:</span>
+      <label style="font-size:10px;color:#8b949e;display:flex;align-items:center;gap:3px;">
+        min
+        <input type="number" id="pf-stay-min" value="0" min="0" max="30" style="width:40px;padding:3px 4px;font-size:11px;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;text-align:center;outline:none;">
+        days
+      </label>
+      <label style="font-size:10px;color:#8b949e;display:flex;align-items:center;gap:3px;">
+        max
+        <input type="number" id="pf-stay-max" value="" min="0" max="90" placeholder="&#x221e;" style="width:40px;padding:3px 4px;font-size:11px;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;text-align:center;outline:none;">
+        days
+      </label>
+    </div>
     <div id="pf-hop-filter"></div>
     <div id="pf-progress"><div id="pf-progress-bar"></div></div>
     <div id="pf-status"></div>
@@ -2020,6 +2033,8 @@ function renderPfResultsList() {
   lengths.forEach(function(n) {
     groups[n].sort(function(a, b) {
       var ca = pathCostEur(a), cb = pathCostEur(b);
+      var aHas = ca ? 0 : 1, bHas = cb ? 0 : 1;
+      if (aHas !== bHas) return aHas - bHas;
       var va = ca ? ca.total : Infinity, vb = cb ? cb.total : Infinity;
       if (va !== vb) return va - vb;
       return pathLabel(a).localeCompare(pathLabel(b));
@@ -2091,29 +2106,78 @@ function renderPfResultsList() {
   refreshSelectedPfArcs();
 }
 
+function _daysBetween(d1, d2) {
+  return Math.round((new Date(d2 + "T00:00:00") - new Date(d1 + "T00:00:00")) / 86400000);
+}
+
 function pathCostEur(path) {
-  var total = 0;
-  var allKnown = true;
   var today = new Date().toISOString().slice(0, 10);
   var tfStart = tfEnabled ? document.getElementById("tf-start").value : null;
   var tfEnd = tfEnabled ? document.getElementById("tf-end").value : null;
-  for (var i = 0; i < path.length - 1; i++) {
+  var minStayEl = document.getElementById("pf-stay-min");
+  var maxStayEl = document.getElementById("pf-stay-max");
+  var minStay = minStayEl && minStayEl.value !== "" ? parseInt(minStayEl.value) : 0;
+  var maxStay = maxStayEl && maxStayEl.value !== "" ? parseInt(maxStayEl.value) : Infinity;
+  if (isNaN(minStay)) minStay = 0;
+  if (isNaN(maxStay)) maxStay = Infinity;
+
+  var nLegs = path.length - 1;
+  if (nLegs < 1) return null;
+
+  var legFlights = [];
+  for (var i = 0; i < nLegs; i++) {
     var key = path[i] + "-" + path[i + 1];
     var flights = fareByRoute[key] || [];
-    var best = null;
+    var valid = [];
     for (var j = 0; j < flights.length; j++) {
       var f = flights[j];
       if (f.date < today) continue;
       if (tfStart && f.date < tfStart) continue;
       if (tfEnd && f.date > tfEnd) continue;
       if (f.price <= 0 || f.eur <= 0) continue;
-      if (best === null || f.eur < best) best = f.eur;
+      valid.push(f);
     }
-    if (best === null) { allKnown = false; }
-    else { total += best; }
+    if (valid.length === 0) return null;
+    legFlights.push(valid);
   }
-  if (!allKnown && total === 0) return null;
-  return {total: Math.round(total * 100) / 100, partial: !allKnown};
+
+  // DP: find cheapest chronologically valid itinerary respecting stay constraints
+  var INF = 1e15;
+
+  // For leg 0: every valid flight is a candidate
+  var prev = [];
+  for (var j = 0; j < legFlights[0].length; j++) {
+    prev.push({cost: legFlights[0][j].eur, date: legFlights[0][j].date});
+  }
+
+  for (var i = 1; i < nLegs; i++) {
+    // Sort prev by date so we can efficiently find cheapest predecessor
+    prev.sort(function(a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+    var curr = [];
+    for (var j = 0; j < legFlights[i].length; j++) {
+      var f = legFlights[i][j];
+      var bestPrev = INF;
+      for (var k = 0; k < prev.length; k++) {
+        var gap = _daysBetween(prev[k].date, f.date);
+        if (gap < minStay) continue;
+        if (gap > maxStay) continue;
+        if (prev[k].cost < bestPrev) bestPrev = prev[k].cost;
+      }
+      if (bestPrev < INF) {
+        curr.push({cost: bestPrev + f.eur, date: f.date});
+      }
+    }
+    if (curr.length === 0) return null;
+    prev = curr;
+  }
+
+  var bestTotal = INF;
+  for (var j = 0; j < prev.length; j++) {
+    if (prev[j].cost < bestTotal) bestTotal = prev[j].cost;
+  }
+
+  if (bestTotal >= INF) return null;
+  return {total: Math.round(bestTotal * 100) / 100, partial: false};
 }
 
 function makePfRow(path, selKeys) {
@@ -2131,11 +2195,12 @@ function makePfRow(path, selKeys) {
   var costSpan = document.createElement("span");
   costSpan.className = "pf-row-cost";
   if (cost) {
-    costSpan.textContent = (cost.partial ? "~" : "") + cost.total.toFixed(0) + "\u20AC";
-    costSpan.title = cost.partial ? "Partial: some legs have no fare data" : "Total cheapest fares in EUR";
+    costSpan.textContent = cost.total.toFixed(0) + "\u20AC";
+    costSpan.title = "Cheapest chronologically valid itinerary in EUR";
   } else {
     costSpan.textContent = "--";
-    costSpan.title = "No fare data available";
+    costSpan.style.color = "#484f58";
+    costSpan.title = "No valid itinerary: missing fares or no schedule matching stay constraints";
   }
 
   var lbl = document.createElement("span");
@@ -2238,6 +2303,9 @@ document.querySelectorAll('input[name="pf-mode"]').forEach(function(r) {
   r.addEventListener("change", updateRoundTripVisibility);
 });
 updateRoundTripVisibility();
+
+document.getElementById("pf-stay-min").addEventListener("change", function() { if (pfActive) renderPfResults(); });
+document.getElementById("pf-stay-max").addEventListener("change", function() { if (pfActive) renderPfResults(); });
 
 /* ---- Search ---- */
 var searchBox = document.getElementById("search");
