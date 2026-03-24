@@ -119,11 +119,11 @@ jobs:
             SHELL=/bin/bash
             PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
-            # 01:30 Berlin (00:30 UTC) - Ryanair scrape, log stats + Telegram notification
+            # 01:30 Berlin (00:30 UTC) - Ryanair full scrape
             30 0 * * * root docker compose --env-file /opt/mossina/.env -f /opt/mossina/docker-compose.yml run --rm scraper python scrape.py --airline FR >> /var/log/mossina-scrape.log 2>&1 && docker compose --env-file /opt/mossina/.env -f /opt/mossina/docker-compose.yml run --rm scraper python scripts/log_stats.py >> /var/log/mossina-scrape.log 2>&1
 
-            # 04:00 every night - Regenerate HTML visualisation
-            0 4 * * * root docker compose --env-file /opt/mossina/.env -f /opt/mossina/docker-compose.yml run --rm visualizer python visualize.py >> /var/log/mossina-viz.log 2>&1
+            # 07:30 Berlin (06:30 UTC) - Wizzair full scrape (all data refreshed)
+            30 6 * * * root docker compose --env-file /opt/mossina/.env -f /opt/mossina/docker-compose.yml run --rm scraper python scrape.py --airline W6 --refresh-days 0 >> /var/log/mossina-wizzair.log 2>&1
             CRON
             chmod 0644 /etc/cron.d/mossina
             echo "    Cron jobs synced"
