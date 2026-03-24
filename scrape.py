@@ -16,7 +16,7 @@ Usage:
 import argparse
 import sys
 
-from src.config import DB_PATH, setup_logging
+from src.config import DB_PATH, OUTPUT_DIR, setup_logging
 from src.db import connect, table_counts, airline_summary, snapshot_prices
 from src.scraper import get_airline, list_airlines, AIRLINES
 
@@ -182,6 +182,15 @@ def main():
             log.info("Saved %d price snapshots to history.", saved)
 
         print_summary(conn, db_path)
+
+        log.info("Regenerating visualisation ...")
+        try:
+            from src.viz.network_graph import build_network_html
+            out = OUTPUT_DIR / "route_network.html"
+            build_network_html(conn, str(out))
+            log.info("Visualisation written to %s", out)
+        except Exception as exc:
+            log.warning("Visualisation failed: %s", exc)
 
     except KeyboardInterrupt:
         log.info("Interrupted. Saving progress ...")
