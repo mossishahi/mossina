@@ -24,7 +24,7 @@ _default_output_dir = PROJECT_ROOT / "output"
 OUTPUT_DIR = Path(os.getenv("MOSSINA_OUTPUT_DIR", _default_output_dir))
 
 WIZZAIR_API_URL = os.getenv("WIZZAIR_API_URL", "")
-PROXY_URL = os.getenv("PROXY_URL", "")
+SCRAPFLY_API_KEY = os.getenv("SCRAPFLY_API_KEY", "")
 
 REQUEST_DELAY = 1.5
 MAX_RETRIES = 3

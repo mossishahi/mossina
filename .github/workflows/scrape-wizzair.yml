@@ -40,7 +40,7 @@ jobs:
       - name: Scrape Wizz Air
         run: python scrape.py --airline W6
         env:
-          PROXY_URL: ${{ secrets.PROXY_URL }}
+          SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
 
       - name: Upload updated database
         run: |
