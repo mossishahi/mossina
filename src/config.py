@@ -20,6 +20,9 @@ DATA_DIR = Path(os.getenv("MOSSINA_DATA_DIR", _default_data_dir))
 _default_db_path = DATA_DIR / "flights.db"
 DB_PATH = Path(os.getenv("MOSSINA_DB_PATH", _default_db_path))
 
+_default_history_path = DATA_DIR / "price_history.db"
+HISTORY_DB_PATH = Path(os.getenv("MOSSINA_HISTORY_DB_PATH", _default_history_path))
+
 _default_output_dir = PROJECT_ROOT / "output"
 OUTPUT_DIR = Path(os.getenv("MOSSINA_OUTPUT_DIR", _default_output_dir))
 

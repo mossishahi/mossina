@@ -17,7 +17,7 @@ import argparse
 import sys
 
 from src.config import DB_PATH, OUTPUT_DIR, setup_logging
-from src.db import connect, table_counts, airline_summary, snapshot_prices
+from src.db import connect, connect_history, table_counts, airline_summary, snapshot_prices
 from src.scraper import get_airline, list_airlines, AIRLINES
 
 log = setup_logging()
@@ -171,13 +171,15 @@ def main():
     log.info("Database: %s", db_path.resolve())
     log.info("Airlines: %s", ", ".join(airline_codes))
 
+    history_conn = connect_history()
+
     try:
         if args.update:
             do_update(conn, airline_codes)
         else:
             run_full_scrape(conn, airline_codes, args)
 
-        saved = snapshot_prices(conn)
+        saved = snapshot_prices(conn, history_conn=history_conn)
         if saved:
             log.info("Saved %d price snapshots to history.", saved)
 
@@ -197,6 +199,7 @@ def main():
         conn.commit()
         print_summary(conn, db_path)
     finally:
+        history_conn.close()
         conn.close()
 
 

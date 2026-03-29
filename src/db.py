@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-from src.config import DB_PATH
+from src.config import DB_PATH, HISTORY_DB_PATH
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS countries (
@@ -70,22 +70,6 @@ CREATE TABLE IF NOT EXISTS fares (
     FOREIGN KEY (origin)      REFERENCES airports(iata_code),
     FOREIGN KEY (destination) REFERENCES airports(iata_code)
 );
-
-CREATE TABLE IF NOT EXISTS price_history (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    origin          TEXT NOT NULL,
-    destination     TEXT NOT NULL,
-    airline         TEXT NOT NULL DEFAULT 'FR',
-    departure_date  TEXT,
-    price           REAL,
-    currency        TEXT,
-    flight_number   TEXT NOT NULL DEFAULT '',
-    scraped_at      TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_price_history_route ON price_history(origin, destination, airline);
-CREATE INDEX IF NOT EXISTS idx_price_history_date ON price_history(departure_date);
-CREATE INDEX IF NOT EXISTS idx_price_history_scraped ON price_history(scraped_at);
 
 CREATE TABLE IF NOT EXISTS wizzair_api_urls (
     url             TEXT PRIMARY KEY,
@@ -239,8 +223,39 @@ def _migrate(conn):
         conn.commit()
 
 
+HISTORY_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS price_history (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    origin          TEXT NOT NULL,
+    destination     TEXT NOT NULL,
+    airline         TEXT NOT NULL DEFAULT 'FR',
+    departure_date  TEXT,
+    price           REAL,
+    currency        TEXT,
+    flight_number   TEXT NOT NULL DEFAULT '',
+    scraped_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_history_route ON price_history(origin, destination, airline);
+CREATE INDEX IF NOT EXISTS idx_price_history_date ON price_history(departure_date);
+CREATE INDEX IF NOT EXISTS idx_price_history_scraped ON price_history(scraped_at);
+"""
+
+
+def connect_history(db_path=None):
+    """Open (or create) the price-history database."""
+    db_path = Path(db_path) if db_path else HISTORY_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), check_same_thread=False, timeout=60)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.executescript(HISTORY_SCHEMA_SQL)
+    conn.commit()
+    return conn
+
+
 def table_counts(conn):
-    tables = ["countries", "airports", "routes", "schedules", "fares", "price_history"]
+    tables = ["countries", "airports", "routes", "schedules", "fares"]
     counts = {}
     for t in tables:
         try:
@@ -258,19 +273,30 @@ def airline_summary(conn):
     return {code: cnt for code, cnt in rows}
 
 
-def snapshot_prices(conn):
-    """Copy current fares into price_history for historical tracking."""
-    cursor = conn.execute(
-        """INSERT INTO price_history
-           (origin, destination, airline, departure_date, price,
-            currency, flight_number, scraped_at)
-           SELECT origin, destination, airline, departure_date, price,
+def snapshot_prices(conn, history_conn=None):
+    """Copy current fares into price_history for historical tracking.
+
+    If *history_conn* is provided, writes to that (separate) database.
+    Otherwise falls back to the main *conn* for backwards compatibility.
+    """
+    rows = conn.execute(
+        """SELECT origin, destination, airline, departure_date, price,
                   currency, flight_number, scraped_at
            FROM fares
            WHERE scraped_at >= datetime('now', '-1 day')"""
+    ).fetchall()
+    if not rows:
+        return 0
+    target = history_conn or conn
+    target.executemany(
+        """INSERT INTO price_history
+           (origin, destination, airline, departure_date, price,
+            currency, flight_number, scraped_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        rows,
     )
-    conn.commit()
-    return cursor.rowcount
+    target.commit()
+    return len(rows)
 
 
 def log_api_fetch(conn, airline, origin, destination, endpoint,
