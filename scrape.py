@@ -16,8 +16,8 @@ Usage:
 import argparse
 import sys
 
-from src.config import DB_PATH, setup_logging
-from src.db import connect, table_counts, airline_summary
+from src.config import DB_PATH, OUTPUT_DIR, setup_logging
+from src.db import connect, connect_history, table_counts, airline_summary, snapshot_prices
 from src.scraper import get_airline, list_airlines, AIRLINES
 
 log = setup_logging()
@@ -171,19 +171,35 @@ def main():
     log.info("Database: %s", db_path.resolve())
     log.info("Airlines: %s", ", ".join(airline_codes))
 
+    history_conn = connect_history()
+
     try:
         if args.update:
             do_update(conn, airline_codes)
         else:
             run_full_scrape(conn, airline_codes, args)
 
+        saved = snapshot_prices(conn, history_conn=history_conn)
+        if saved:
+            log.info("Saved %d price snapshots to history.", saved)
+
         print_summary(conn, db_path)
+
+        log.info("Regenerating visualisation ...")
+        try:
+            from src.viz.network_graph import build_network_html
+            out = OUTPUT_DIR / "route_network.html"
+            build_network_html(conn, str(out))
+            log.info("Visualisation written to %s", out)
+        except Exception as exc:
+            log.warning("Visualisation failed: %s", exc)
 
     except KeyboardInterrupt:
         log.info("Interrupted. Saving progress ...")
         conn.commit()
         print_summary(conn, db_path)
     finally:
+        history_conn.close()
         conn.close()
 
 

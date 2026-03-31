@@ -94,8 +94,8 @@ def _fetch_route(origin, dest, now, end_date, scraped_at, stop_event):
                         continue
                     fn = (flight.get("flightNumber") or "").replace(" ", "")
                     times = flight.get("time", [])
-                    dep_dt = times[0] if len(times) > 0 else ""
-                    arr_dt = times[1] if len(times) > 1 else ""
+                    dep_dt = (times[0] if len(times) > 0 else "").split(".")[0]
+                    arr_dt = (times[1] if len(times) > 1 else "").split(".")[0]
                     fares.append((origin, dest, AIRLINE, dep_dt, arr_dt,
                                   price, currency, fn, scraped_at))
         cursor += timedelta(days=FLEX_DAYS + 1)

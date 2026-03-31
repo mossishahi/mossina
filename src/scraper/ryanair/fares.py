@@ -46,9 +46,9 @@ def scrape_fares(conn, airports, limit=None):
 
         for fare in data.get("fares", []):
             outbound = fare.get("outbound", {})
-            dep_date = outbound.get("departureDate", "")
-            arr_date = outbound.get("arrivalDate", "")
-            fn = outbound.get("flightNumber", "")
+            dep_date = outbound.get("departureDate", "").split(".")[0]
+            arr_date = outbound.get("arrivalDate", "").split(".")[0]
+            fn = outbound.get("flightNumber", "").replace(" ", "")
             dest_code = outbound.get("arrivalAirport", {}).get("iataCode", "")
             price_info = outbound.get("price", {})
             price = price_info.get("value")

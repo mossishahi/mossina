@@ -1,8 +1,8 @@
 name: Scrape Wizz Air
 
 on:
-  schedule:
-    - cron: "0 2 * * *"   # daily at 02:00 UTC
+  # schedule:
+  #   - cron: "0 2 * * *"   # daily at 02:00 UTC (disabled until ScrapFly plan active)
   workflow_dispatch:       # manual trigger from GitHub UI
 
 jobs:
@@ -40,7 +40,7 @@ jobs:
       - name: Scrape Wizz Air
         run: python scrape.py --airline W6
         env:
-          PROXY_URL: ${{ secrets.PROXY_URL }}
+          SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
 
       - name: Upload updated database
         run: |
