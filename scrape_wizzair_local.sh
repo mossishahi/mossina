@@ -14,12 +14,13 @@
 set -euo pipefail
 
 SERVER="root@167.99.243.218"
+SSH_KEY="$HOME/.ssh/mossina"
 REMOTE_DB="/var/lib/docker/volumes/mossina_mossina_data/_data/flights.db"
 LOCAL_DB="data/flights.db"
 
 echo "==> Downloading production database from server ..."
 mkdir -p data
-scp "$SERVER:$REMOTE_DB" "$LOCAL_DB"
+scp -i "$SSH_KEY" "$SERVER:$REMOTE_DB" "$LOCAL_DB"
 echo "    Downloaded $(du -h "$LOCAL_DB" | cut -f1)"
 
 echo ""
@@ -28,5 +29,5 @@ python3 scrape.py --airline W6 "$@"
 
 echo ""
 echo "==> Uploading updated database to server ..."
-scp "$LOCAL_DB" "$SERVER:$REMOTE_DB"
+scp -i "$SSH_KEY" "$LOCAL_DB" "$SERVER:$REMOTE_DB"
 echo "    Done! Database synced to server."

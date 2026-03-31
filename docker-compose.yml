@@ -1,71 +1,44 @@
 services:
-
-  # ─── Scraper ────────────────────────────────────────────────────────────────
-  scraper:
-    image: ghcr.io/mossishahi/mossina:latest
-    container_name: mossina_scraper
-    restart: "no"
-    command: ["python", "scrape.py"]
-    volumes:
-      - mossina_data:/app/data
-      - mossina_output:/app/output
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
-      - PROXY_URL=${PROXY_URL}
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "5"
-
-  # ─── Visualizer ─────────────────────────────────────────────────────────────
-  visualizer:
-    image: ghcr.io/mossishahi/mossina:latest
-    container_name: mossina_visualizer
-    restart: "no"
-    command: ["python", "visualize.py"]
-    volumes:
-      - mossina_data:/app/data
-      - mossina_output:/app/output
-    environment:
-      - PYTHONUNBUFFERED=1
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "5"
-  # ─── DB Shell ────────────────────────────────────────────────────────────────
-  # Always-on container for querying the SQLite database.
-  # Usage: docker exec -it mossina_db sqlite3 /app/data/flights.db
   db:
-    image: alpine:latest
-    container_name: mossina_db
-    restart: unless-stopped
-    command: sh -c "apk add --no-cache sqlite && tail -f /dev/null"
-    volumes:
-      - mossina_data:/app/data
-
-  # ─── Web UI ──────────────────────────────────────────────────────────────────
-  # Serves the generated HTML visualisation at http://YOUR_IP:8080
-  # Starts automatically on every deploy and restarts if the server reboots.
-  web:
-    image: nginx:alpine
-    container_name: mossina_web
-    restart: unless-stopped
+    image: postgres:16-alpine
     ports:
-      - "8080:80"
+      - "5432:5432"
     volumes:
-      - mossina_output:/usr/share/nginx/html:ro
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "3"
-# ─── Volumes ────────────────────────────────────────────────────────────────
+      - pgdata:/var/lib/postgresql/data
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+  backend:
+    build:
+      context: ./webapp/backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    env_file:
+      - .env
+
+  frontend:
+    build:
+      context: ./webapp/frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+  scraper:
+    build:
+      context: ./scraper
+    depends_on:
+      - db
+    env_file:
+      - .env
+    profiles:
+      - scraper
+
 volumes:
-  mossina_data:
-    driver: local
-  mossina_output:
-    driver: local
+  pgdata:

@@ -21,3 +21,6 @@ output/*
 dist/
 build/
 .env
+
+# Node
+node_modules/
