@@ -38,7 +38,8 @@ services:
       - db
     env_file:
       - .env
-    restart: unless-stopped
+    profiles:
+      - scraper
 
 volumes:
   pgdata:
