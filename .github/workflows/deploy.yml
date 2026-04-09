@@ -5,157 +5,91 @@ on:
     branches:
       - production
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
 jobs:
-
-  # ─── 1. Build & push Docker image to GitHub Container Registry ────────────
-  build-and-push:
-    name: Build & Push Image
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract image metadata (tags & labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest
-            type=sha,prefix=sha-,format=short
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ─── 2. Deploy to DigitalOcean Droplet ────────────────────────────────────
   deploy:
-    name: Deploy to Droplet
+    name: Deploy Full Stack
     runs-on: ubuntu-latest
-    needs: build-and-push
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ── Copy docker-compose.yml from repo to Droplet ──────────────────────
-      # This runs before the SSH step so the server is always in sync with
-      # whatever is in the repository. No more manual edits on the server.
-      - name: Sync docker-compose.yml to Droplet
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DO_HOST }}
-          username: ${{ secrets.DO_USER }}
-          key: ${{ secrets.DO_SSH_KEY }}
-          source: "docker-compose.yml"
-          target: "/opt/mossina/"
-          strip_components: 0
-
-      # ── SSH in and run the rest of the deploy ─────────────────────────────
-      - name: SSH into Droplet and deploy
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GH_PAT: ${{ secrets.GH_PAT }}
-          PROXY_URL: ${{ secrets.PROXY_URL }}
+          SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
         with:
           host: ${{ secrets.DO_HOST }}
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
-          envs: TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID,GH_PAT,PROXY_URL
+          envs: GH_PAT,SCRAPFLY_API_KEY
+          command_timeout: 15m
           script: |
             set -e
+            REPO_DIR=~/mossina-dev
+            REPO_URL="https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
 
-            echo "==> Logging in to GHCR..."
-            echo "${{ secrets.GITHUB_TOKEN }}" | \
-              docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "==> Syncing repo..."
+            if [ -d "$REPO_DIR/.git" ]; then
+              git -C "$REPO_DIR" fetch origin
+              git -C "$REPO_DIR" checkout production 2>/dev/null || git -C "$REPO_DIR" checkout -b production origin/production
+              git -C "$REPO_DIR" reset --hard origin/production
+            else
+              git clone -b production "$REPO_URL" "$REPO_DIR"
+            fi
 
-            echo "==> Pulling latest image..."
-            docker compose -f /opt/mossina/docker-compose.yml pull
+            echo "==> Updating .env..."
+            cd "$REPO_DIR"
+            if [ ! -f .env ]; then
+              echo "ERROR: .env missing — create it manually first"
+              exit 1
+            fi
+            grep -q SCRAPFLY_API_KEY .env || echo "SCRAPFLY_API_KEY=${SCRAPFLY_API_KEY}" >> .env
+            sed -i "s|^SCRAPFLY_API_KEY=.*|SCRAPFLY_API_KEY=${SCRAPFLY_API_KEY}|" .env
 
-            echo "==> Pruning old images to free disk space..."
-            docker image prune -f
+            echo "==> Building and deploying services..."
+            docker compose build
+            docker compose up -d db backend frontend
 
-            echo "==> Writing secrets to .env file..."
-            cat > /opt/mossina/.env << ENV
-            TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-            TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
-            PROXY_URL=${PROXY_URL}
-            ENV
-            chmod 600 /opt/mossina/.env
-            echo "    .env written"
+            echo "==> Waiting for backend health..."
+            sleep 10
+            curl -sf http://localhost:8000/api/health || (echo "Backend unhealthy" && docker compose logs backend --tail 30 && exit 1)
 
             echo "==> Syncing cron jobs..."
-            cat > /etc/cron.d/mossina << CRON
-            # Mossina - managed by GitHub Actions. Do not edit manually.
+            cat > /etc/cron.d/mossina << 'CRON'
+            # Mossina - managed by GitHub Actions deploy. Do not edit manually.
             SHELL=/bin/bash
             PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
             # 01:30 Berlin (00:30 UTC) - Ryanair full scrape
-            30 0 * * * root docker compose --env-file /opt/mossina/.env -f /opt/mossina/docker-compose.yml run --rm scraper python scrape.py --airline FR >> /var/log/mossina-scrape.log 2>&1 && docker compose --env-file /opt/mossina/.env -f /opt/mossina/docker-compose.yml run --rm scraper python scripts/log_stats.py >> /var/log/mossina-scrape.log 2>&1
+            30 0 * * * root cd /root/mossina-dev && docker compose --profile scraper run --rm scraper python cli.py --airline FR -r 0 >> /var/log/mossina-scrape.log 2>&1
 
-            # 07:30 Berlin (06:30 UTC) - Wizzair full scrape (all data refreshed)
-            30 6 * * * root docker compose --env-file /opt/mossina/.env -f /opt/mossina/docker-compose.yml run --rm scraper python scrape.py --airline W6 --refresh-days 0 >> /var/log/mossina-wizzair.log 2>&1
+            # 07:30 Berlin (06:30 UTC) - Wizzair full scrape via ScrapFly
+            30 6 * * * root cd /root/mossina-dev && docker compose --profile scraper run --rm scraper python cli.py --airline W6 -r 0 -w 3 >> /var/log/mossina-wizzair.log 2>&1
             CRON
             chmod 0644 /etc/cron.d/mossina
-            echo "    Cron jobs synced"
 
-            echo "==> Ensuring log files exist..."
-            touch /var/log/mossina-scrape.log /var/log/mossina-viz.log
-
-            echo "==> Syncing dev directory..."
-            REPO_URL="https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
-            if [ -d ~/mossina-dev/.git ]; then
-              git -C ~/mossina-dev fetch origin
-              git -C ~/mossina-dev reset --hard origin/production
-            else
-              git clone "$REPO_URL" ~/mossina-dev
-            fi
-            echo "    Dev directory synced at ~/mossina-dev"
-
-            echo "==> Starting web server..."
-            docker compose -f /opt/mossina/docker-compose.yml up -d web
-            echo "    Web server running at http://$(curl -fsS ifconfig.me):8080"
+            echo "==> Pruning old images..."
+            docker image prune -f
 
             echo "==> Deploy complete"
+            echo "    Frontend: http://$(curl -fsS ifconfig.me):8080"
 
-      - name: Notify Telegram on success
-        if: success()
+      - name: Notify Telegram
+        if: always()
         run: |
           SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          RESPONSE=$(curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          if [ "${{ job.status }}" = "success" ]; then
+            MSG="✅ Mossina deployed (${SHA} by ${{ github.actor }})"
+          else
+            MSG="❌ Mossina deploy failed (${SHA}) — check Actions log"
+          fi
+          curl -sS -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -H "Content-Type: application/json" \
-            -d "{\"chat_id\": \"${TELEGRAM_CHAT_ID}\", \"text\": \"Mossina deployed successfully (${SHA} by ${{ github.actor }})\"}")
-          echo "Telegram response: ${RESPONSE}"
-          echo "${RESPONSE}" | grep -q '"ok":true' || (echo "Telegram API error" && exit 1)
+            -d "{\"chat_id\": \"${TELEGRAM_CHAT_ID}\", \"text\": \"${MSG}\"}" \
+            > /dev/null 2>&1 || true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

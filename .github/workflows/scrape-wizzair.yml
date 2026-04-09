@@ -1,52 +1,28 @@
-name: Scrape Wizz Air
+name: Scrape Wizz Air (on-demand)
 
 on:
-  # schedule:
-  #   - cron: "0 2 * * *"   # daily at 02:00 UTC (disabled until ScrapFly plan active)
-  workflow_dispatch:       # manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   scrape:
-    name: Scrape W6
+    name: Trigger W6 Scrape on Server
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 120
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Trigger scrape via SSH
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Set up SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
-
-      - name: Download production database
-        run: |
-          mkdir -p data
-          scp -i ~/.ssh/deploy_key \
-            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/lib/docker/volumes/mossina_mossina_data/_data/flights.db \
-            data/flights.db
-
-      - name: Scrape Wizz Air
-        run: python scrape.py --airline W6
-        env:
-          SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
-
-      - name: Upload updated database
-        run: |
-          scp -i ~/.ssh/deploy_key \
-            data/flights.db \
-            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/lib/docker/volumes/mossina_mossina_data/_data/flights.db
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          command_timeout: 100m
+          script: |
+            set -e
+            cd ~/mossina-dev
+            echo "Starting Wizz Air scrape..."
+            docker compose --profile scraper run --rm scraper python cli.py --airline W6 -r 0 -w 3
+            echo "Scrape complete."
 
       - name: Notify Telegram
         if: always()
@@ -61,3 +37,6 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"chat_id\": \"${{ secrets.TELEGRAM_CHAT_ID }}\", \"text\": \"$MSG\"}" \
             > /dev/null 2>&1 || true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
