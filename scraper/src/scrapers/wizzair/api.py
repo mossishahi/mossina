@@ -43,9 +43,7 @@ _HEADERS = {
 }
 
 _POST_RETRIES = 5
-_throttle_lock = threading.Lock()
-_last_request_time = 0.0
-_MIN_INTERVAL = 1.0
+_MIN_INTERVAL = 2.0
 
 _override_api_url = ""
 _scrapfly_key = ""
@@ -199,14 +197,23 @@ def _interruptible_sleep(seconds, stop_event=None):
         stop_event.wait(seconds)
 
 
-def _throttle(stop_event=None):
-    global _last_request_time
-    with _throttle_lock:
+class _PerWorkerThrottle:
+    """Per-worker rate limiter so each worker waits independently."""
+    def __init__(self):
+        self._times = {}
+        self._lock = threading.Lock()
+
+    def wait(self, worker_id, stop_event=None):
+        with self._lock:
+            last = self._times.get(worker_id, 0.0)
         now = time.time()
-        wait = _MIN_INTERVAL - (now - _last_request_time)
+        wait = _MIN_INTERVAL - (now - last)
         if wait > 0:
             _interruptible_sleep(wait, stop_event)
-        _last_request_time = time.time()
+        with self._lock:
+            self._times[worker_id] = time.time()
+
+_throttle = _PerWorkerThrottle()
 
 
 # ------------------------------------------------------------------
@@ -288,7 +295,7 @@ class WizzairSession:
             if self._stopped():
                 return None
             try:
-                _throttle(self._stop)
+                _throttle.wait(self.worker_id, self._stop)
                 if self._stopped():
                     return None
 
