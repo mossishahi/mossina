@@ -63,10 +63,10 @@ jobs:
             PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
             # 01:30 Berlin (00:30 UTC) - Ryanair full scrape
-            30 0 * * * root cd /root/mossina-dev && docker compose --profile scraper run --rm scraper python cli.py --airline FR -r 0 >> /var/log/mossina-scrape.log 2>&1
+            30 0 * * * root cd /root/mossina-dev && docker compose --profile scraper run --rm scraper python cli.py --airline FR -r 0 >> /var/log/mossina-scrape.log 2>&1 && curl -sS -X POST "https://api.telegram.org/bot$(grep TELEGRAM_BOT_TOKEN .env | cut -d= -f2)/sendMessage" -H "Content-Type: application/json" -d "{\"chat_id\": \"$(grep TELEGRAM_CHAT_ID .env | cut -d= -f2)\", \"text\": \"Ryanair scrape completed successfully\"}" > /dev/null 2>&1 || curl -sS -X POST "https://api.telegram.org/bot$(grep TELEGRAM_BOT_TOKEN .env | cut -d= -f2)/sendMessage" -H "Content-Type: application/json" -d "{\"chat_id\": \"$(grep TELEGRAM_CHAT_ID .env | cut -d= -f2)\", \"text\": \"Ryanair scrape FAILED — check /var/log/mossina-scrape.log\"}" > /dev/null 2>&1
 
             # 07:30 Berlin (06:30 UTC) - Wizzair full scrape via ScrapFly
-            30 6 * * * root cd /root/mossina-dev && docker compose --profile scraper run --rm scraper python cli.py --airline W6 -r 0 -w 3 >> /var/log/mossina-wizzair.log 2>&1
+            30 6 * * * root cd /root/mossina-dev && docker compose --profile scraper run --rm scraper python cli.py --airline W6 -r 0 -w 3 >> /var/log/mossina-wizzair.log 2>&1 && curl -sS -X POST "https://api.telegram.org/bot$(grep TELEGRAM_BOT_TOKEN .env | cut -d= -f2)/sendMessage" -H "Content-Type: application/json" -d "{\"chat_id\": \"$(grep TELEGRAM_CHAT_ID .env | cut -d= -f2)\", \"text\": \"Wizz Air scrape completed successfully\"}" > /dev/null 2>&1 || curl -sS -X POST "https://api.telegram.org/bot$(grep TELEGRAM_BOT_TOKEN .env | cut -d= -f2)/sendMessage" -H "Content-Type: application/json" -d "{\"chat_id\": \"$(grep TELEGRAM_CHAT_ID .env | cut -d= -f2)\", \"text\": \"Wizz Air scrape FAILED — check /var/log/mossina-wizzair.log\"}" > /dev/null 2>&1
             CRON
             chmod 0644 /etc/cron.d/mossina
 
