@@ -6,13 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field
 class AirportOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    iata_code: str
+    iata: str
     name: str | None = None
     city: str | None = None
     country_code: str | None = None
-    country_name: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
+    country: str | None = None
+    lat: float | None = None
+    lon: float | None = None
 
 
 class CountryOut(BaseModel):

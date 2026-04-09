@@ -15,13 +15,13 @@ router = APIRouter(prefix="/airports", tags=["airports"])
 def _airport_to_out(ap: Airport) -> AirportOut:
     country_name = ap.country.name if ap.country else None
     return AirportOut(
-        iata_code=ap.iata_code,
+        iata=ap.iata_code,
         name=ap.name,
         city=ap.city,
         country_code=ap.country_code,
-        country_name=country_name,
-        latitude=ap.latitude,
-        longitude=ap.longitude,
+        country=country_name or ap.country_code or "",
+        lat=ap.latitude,
+        lon=ap.longitude,
     )
 
 

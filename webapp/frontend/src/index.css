@@ -47,3 +47,41 @@ body {
   scrollbar-width: thin;
   scrollbar-color: #30363d #161b22;
 }
+
+@keyframes dotPulse {
+  0%, 20% { content: ""; }
+  40% { content: "."; }
+  60% { content: ".."; }
+  80%, 100% { content: "..."; }
+}
+
+.loading-dots::after {
+  content: "";
+  animation: dotPulse 1.5s steps(1) infinite;
+}
+
+@keyframes bestFareFlash {
+  0%, 100% { background-color: rgba(88, 166, 255, 0.15); }
+  50% { background-color: rgba(88, 166, 255, 0.35); }
+}
+
+.best-fare-flash {
+  animation: bestFareFlash 0.8s ease-in-out 2;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.shimmer-line {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    #58a6ff 30%,
+    #79c0ff 50%,
+    #58a6ff 70%,
+    transparent 100%
+  );
+  animation: shimmer 1.2s ease-in-out infinite;
+}

@@ -1,32 +1,59 @@
-import { useState } from "react";
-import { X, Route, RotateCcw, Loader2, ArrowRight } from "lucide-react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { ChevronRight } from "lucide-react";
 import { useSearchPaths, useSearchCycles } from "@/hooks/useSearch";
+import { useAirports } from "@/hooks/useAirports";
 import { useMapStore } from "@/stores/mapStore";
 import { useFilterStore } from "@/stores/filterStore";
+import { usePathStore, pathKey_ } from "@/stores/pathStore";
+import { useTabStore } from "@/stores/tabStore";
 import { AIRLINE_META } from "@/api/types";
 import type { PathResult } from "@/api/types";
+import SearchControls from "./SearchControls";
+import HopFilter from "./HopFilter";
+import type { HopFilterValue } from "./HopFilter";
 
-type Mode = "path" | "cycle";
+export default function Pathfinder() {
+  const activeTab = useTabStore((s) => s.activeTab);
+  const isCycle = activeTab === "cycles";
+  const label = isCycle ? "cycle" : "path";
 
-interface Props {
-  onClose: () => void;
-}
-
-export default function Pathfinder({ onClose }: Props) {
-  const [mode, setMode] = useState<Mode>("path");
   const [maxHops, setMaxHops] = useState(3);
+  const [onlySelected, setOnlySelected] = useState(false);
+  const [openGroupsPath, setOpenGroupsPath] = useState<Set<number>>(new Set());
+  const [openGroupsCycle, setOpenGroupsCycle] = useState<Set<number>>(new Set());
+  const [hopFilters, setHopFilters] = useState<Record<number, HopFilterValue[]>>({});
   const selectedCities = useMapStore((s) => s.selectedCities);
   const activeAirlines = useMapStore((s) => s.activeAirlines);
   const { dateFrom, dateTo } = useFilterStore();
 
+  const { data: airports = [] } = useAirports();
+  const nameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    airports.forEach((a) => m.set(a.iata, a.city || a.name));
+    return m;
+  }, [airports]);
+
+  const clearPaths = usePathStore((s) => s.clearPaths);
+  const setSearchActive = usePathStore((s) => s.setSearchActive);
+
   const pathMutation = useSearchPaths();
   const cycleMutation = useSearchCycles();
 
-  const mutation = mode === "path" ? pathMutation : cycleMutation;
-  const results = mutation.data?.paths ?? [];
-  const elapsed = mutation.data?.elapsed_seconds;
+  const prevCitiesRef = useRef(selectedCities);
+  useEffect(() => {
+    if (prevCitiesRef.current !== selectedCities) {
+      prevCitiesRef.current = selectedCities;
+      clearPaths();
+      setSearchActive(false);
+      pathMutation.reset();
+      cycleMutation.reset();
+      setHopFilters({});
+      setOpenGroupsPath(new Set());
+      setOpenGroupsCycle(new Set());
+    }
+  }, [selectedCities]);
 
-  function handleSearch() {
+  function handleSearchBoth() {
     const cities = [...selectedCities];
     if (cities.length === 0) return;
 
@@ -37,188 +64,385 @@ export default function Pathfinder({ onClose }: Props) {
         .toISOString()
         .slice(0, 10);
 
-    if (mode === "path") {
-      pathMutation.mutate({
-        origins: cities,
-        destinations: cities,
-        max_hops: maxHops,
-        date_from: from,
-        date_to: to,
-        only_selected: true,
-        airline: activeAirlines.size === 1 ? [...activeAirlines][0] : undefined,
-      });
-    } else {
-      cycleMutation.mutate({
-        origins: cities,
-        max_hops: maxHops,
-        date_from: from,
-        date_to: to,
-        only_selected: true,
-      });
-    }
+    setOpenGroupsPath(new Set());
+    setOpenGroupsCycle(new Set());
+    setHopFilters({});
+    clearPaths();
+    setSearchActive(true);
+
+    pathMutation.mutate({
+      origins: cities,
+      destinations: cities,
+      max_hops: maxHops,
+      date_from: from,
+      date_to: to,
+      only_selected: false,
+      airline: activeAirlines.size === 1 ? [...activeAirlines][0] : undefined,
+    });
+
+    cycleMutation.mutate({
+      origins: cities,
+      max_hops: maxHops,
+      date_from: from,
+      date_to: to,
+      only_selected: false,
+    });
   }
 
-  const grouped = results.reduce(
-    (acc, p) => {
-      const hops = p.legs.length;
-      if (!acc[hops]) acc[hops] = [];
-      acc[hops].push(p);
-      return acc;
-    },
-    {} as Record<number, PathResult[]>,
-  );
+  const mutation = isCycle ? cycleMutation : pathMutation;
+  const results = mutation.data?.results ?? [];
+  const searchTimeMs = mutation.data?.search_time_ms;
+  const openGroups = isCycle ? openGroupsCycle : openGroupsPath;
+  const setOpenGroups = isCycle ? setOpenGroupsCycle : setOpenGroupsPath;
 
-  Object.values(grouped).forEach((g) =>
-    g.sort((a, b) => a.total_eur - b.total_eur),
-  );
+  const pathCount = pathMutation.data?.results?.length ?? 0;
+  const cycleCount = cycleMutation.data?.results?.length ?? 0;
+
+  const filtered = useMemo(() => {
+    if (!onlySelected || selectedCities.size === 0) return results;
+    return results.filter((p) => p.path.every((iata) => selectedCities.has(iata)));
+  }, [results, onlySelected, selectedCities]);
+
+  const grouped = useMemo(() => {
+    const g: Record<number, PathResult[]> = {};
+    filtered.forEach((p) => {
+      const n = p.legs.length;
+      if (!g[n]) g[n] = [];
+      g[n].push(p);
+    });
+    Object.values(g).forEach((arr) =>
+      arr.sort((a, b) => (a.total_cost_eur ?? Infinity) - (b.total_cost_eur ?? Infinity)),
+    );
+    return g;
+  }, [filtered]);
+
+  const lengths = Object.keys(grouped).map(Number).sort((a, b) => a - b);
+
+  useMemo(() => {
+    if (lengths.length > 0 && openGroups.size === 0) {
+      setOpenGroups(new Set([lengths[0]]));
+    }
+  }, [results]);
+
+  function toggleGroup(n: number) {
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(n)) next.delete(n);
+      else next.add(n);
+      return next;
+    });
+  }
+
+  function cityName(iata: string) {
+    return nameMap.get(iata) || iata;
+  }
+
+  function getHopFiltersForLength(n: number): HopFilterValue[] {
+    if (hopFilters[n]) return hopFilters[n];
+    return Array.from({ length: n + 1 }, () => ({ minHours: 24, city: null }));
+  }
+
+  const updateHopFilter = useCallback((length: number, stopIdx: number, val: HopFilterValue) => {
+    setHopFilters((prev) => {
+      const current = prev[length] || Array.from({ length: length + 1 }, () => ({ minHours: 24, city: null }));
+      const next = [...current];
+      next[stopIdx] = val;
+      return { ...prev, [length]: next };
+    });
+  }, []);
+
+  function applyHopFilters(paths: PathResult[], length: number): PathResult[] {
+    const filters = getHopFiltersForLength(length);
+    return paths.filter((p) => {
+      for (let i = 0; i < p.path.length; i++) {
+        const f = filters[i];
+        if (!f) continue;
+        if (f.city && p.path[i] !== f.city) return false;
+      }
+      return true;
+    });
+  }
 
   return (
-    <div className="absolute top-4 right-4 bottom-4 w-96 bg-black/90 backdrop-blur-xl border border-[#30363d] rounded-xl flex flex-col overflow-hidden z-20">
-      <div className="flex items-center justify-between p-4 border-b border-[#30363d]">
-        <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-          <Route size={16} className="text-[#58a6ff]" />
-          Pathfinder
-        </h2>
-        <button
-          onClick={onClose}
-          className="text-[#8b949e] hover:text-white transition-colors"
-        >
-          <X size={16} />
-        </button>
-      </div>
+    <>
+      <SearchControls
+        maxHops={maxHops}
+        setMaxHops={setMaxHops}
+        onSearch={handleSearchBoth}
+        pathPending={pathMutation.isPending}
+        cyclePending={cycleMutation.isPending}
+        pathDone={pathMutation.isSuccess}
+        cycleDone={cycleMutation.isSuccess}
+      />
 
-      <div className="p-4 border-b border-[#30363d] space-y-3">
-        <div className="flex gap-2">
-          <button
-            onClick={() => setMode("path")}
-            className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              mode === "path"
-                ? "bg-[#58a6ff]/15 text-[#58a6ff] border border-[#58a6ff]/30"
-                : "bg-[#161b22] text-[#8b949e] border border-[#30363d]"
-            }`}
-          >
-            <span className="flex items-center justify-center gap-1.5">
-              <ArrowRight size={14} />
-              Path
-            </span>
-          </button>
-          <button
-            onClick={() => setMode("cycle")}
-            className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              mode === "cycle"
-                ? "bg-[#58a6ff]/15 text-[#58a6ff] border border-[#58a6ff]/30"
-                : "bg-[#161b22] text-[#8b949e] border border-[#30363d]"
-            }`}
-          >
-            <span className="flex items-center justify-center gap-1.5">
-              <RotateCcw size={14} />
-              Cycle
-            </span>
-          </button>
-        </div>
+      <div className="bg-black/80 backdrop-blur-xl border border-[#30363d] rounded-xl overflow-hidden">
+        <TabBarInline
+          pathCount={pathCount}
+          cycleCount={cycleCount}
+          pathPending={pathMutation.isPending}
+          cyclePending={cycleMutation.isPending}
+        />
 
-        <div className="flex items-center gap-3">
-          <label className="text-xs text-[#8b949e]">Max hops</label>
-          <input
-            type="number"
-            min={1}
-            max={10}
-            value={maxHops}
-            onChange={(e) => setMaxHops(Number(e.target.value))}
-            className="w-16 bg-[#161b22] border border-[#30363d] rounded-lg py-1 px-2 text-sm text-[#c9d1d9] text-center focus:outline-none focus:border-[#58a6ff]"
-          />
-          <button
-            onClick={handleSearch}
-            disabled={mutation.isPending || selectedCities.size === 0}
-            className="flex-1 py-1.5 bg-[#238636] hover:bg-[#2ea043] disabled:opacity-50 disabled:hover:bg-[#238636] text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
-          >
-            {mutation.isPending ? (
-              <>
-                <Loader2 size={14} className="animate-spin" />
-                Searching...
-              </>
-            ) : (
-              "Search"
-            )}
-          </button>
-        </div>
-        {selectedCities.size === 0 && (
-          <p className="text-xs text-[#e5534b]">
-            Select cities on the map first
-          </p>
-        )}
-      </div>
+        <div className="px-3 py-2 space-y-1.5">
+          {mutation.isError && (
+            <div className="text-xs text-[#e5534b] bg-[#e5534b]/10 border border-[#e5534b]/30 rounded-md p-2.5">
+              Search failed. Please try again.
+            </div>
+          )}
 
-      <div className="flex-1 overflow-y-auto p-4">
-        {mutation.isError && (
-          <div className="text-sm text-[#e5534b] bg-[#e5534b]/10 border border-[#e5534b]/30 rounded-lg p-3">
-            Search failed. Please try again.
-          </div>
-        )}
+          {mutation.isPending && (
+            <p className="text-xs text-[#8b949e] text-center py-3">
+              Few seconds please<span className="loading-dots" />
+            </p>
+          )}
 
-        {results.length > 0 && (
-          <div className="space-y-4">
-            {elapsed != null && (
-              <p className="text-xs text-[#8b949e]">
-                {results.length} results in {elapsed.toFixed(1)}s
-              </p>
-            )}
-            {Object.entries(grouped)
-              .sort(([a], [b]) => Number(a) - Number(b))
-              .map(([hops, paths]) => (
-                <div key={hops}>
-                  <h4 className="text-xs font-medium text-[#8b949e] uppercase tracking-wider mb-2">
-                    {hops} {Number(hops) === 1 ? "hop" : "hops"}
-                  </h4>
-                  <div className="space-y-1.5">
-                    {paths.slice(0, 20).map((p, i) => (
-                      <PathCard key={i} path={p} />
-                    ))}
-                    {paths.length > 20 && (
-                      <p className="text-xs text-[#484f58] text-center py-1">
-                        +{paths.length - 20} more
-                      </p>
+          {results.length > 0 && (
+            <div>
+              <div className="pb-2 space-y-1.5">
+                <p className="text-[11px] text-[#484f58]">
+                  {filtered.length}
+                  {onlySelected && filtered.length !== results.length
+                    ? ` of ${results.length}`
+                    : ""}{" "}
+                  {label}s
+                  {searchTimeMs != null && ` in ${(searchTimeMs / 1000).toFixed(1)}s`}
+                </p>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={onlySelected}
+                    onChange={(e) => setOnlySelected(e.target.checked)}
+                    className="accent-[#58a6ff] w-3 h-3 rounded"
+                  />
+                  <span className="text-[11px] text-[#8b949e]">
+                    Only selected cities
+                  </span>
+                </label>
+              </div>
+
+              {lengths.map((n) => {
+                const allPaths = grouped[n];
+                const hopFilteredPaths = applyHopFilters(allPaths, n);
+                const isOpen = openGroups.has(n);
+                const hf = getHopFiltersForLength(n);
+                return (
+                  <div key={n}>
+                    <button
+                      onClick={() => toggleGroup(n)}
+                      className="w-full flex items-center gap-2 px-1 py-1.5 text-left hover:bg-[#161b22]/60 transition-colors border-t border-[#21262d]"
+                    >
+                      <ChevronRight
+                        size={12}
+                        className={`text-[#8b949e] transition-transform ${isOpen ? "rotate-90" : ""}`}
+                      />
+                      <span className="text-xs font-semibold text-[#58a6ff]">
+                        Length {n}
+                      </span>
+                      <span className="text-[10px] text-[#484f58] bg-[#161b22] px-1.5 py-0.5 rounded-full">
+                        {hopFilteredPaths.length !== allPaths.length
+                          ? `${hopFilteredPaths.length}/${allPaths.length}`
+                          : `${allPaths.length}`}
+                      </span>
+                    </button>
+
+                    {isOpen && (
+                      <div className="pb-1">
+                        <div className="flex gap-0.5 px-1 py-1.5 flex-wrap items-center">
+                          {Array.from({ length: n + 1 }, (_, i) => {
+                            const isFirst = i === 0;
+                            const isLast = i === n;
+                            const locked = isCycle
+                              ? (isFirst || isLast)
+                              : (isFirst || isLast);
+                            if (isCycle && isLast) return null;
+                            const lockedLabel = isFirst
+                              ? "Origin"
+                              : isLast ? "Dest" : undefined;
+                            return (
+                              <HopFilter
+                                key={i}
+                                index={i}
+                                total={n + 1}
+                                locked={locked}
+                                lockedLabel={lockedLabel}
+                                value={hf[i] || { minHours: 24, city: null }}
+                                onChange={(val) => updateHopFilter(n, i, val)}
+                              />
+                            );
+                          })}
+                        </div>
+                        <div className="space-y-1">
+                          {hopFilteredPaths.map((p, i) => (
+                            <PathCard key={i} result={p} cityName={cityName} pathKey={pathKey_(p)} hopFilters={hf} />
+                          ))}
+                          {hopFilteredPaths.length === 0 && (
+                            <p className="text-[10px] text-[#484f58] text-center py-2">No matches</p>
+                          )}
+                        </div>
+                      </div>
                     )}
                   </div>
-                </div>
-              ))}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
 
-        {mutation.isSuccess && results.length === 0 && (
-          <p className="text-sm text-[#8b949e] text-center py-8">
-            No paths found for selected criteria
-          </p>
+          {mutation.isSuccess && filtered.length === 0 && (
+            <p className="text-xs text-[#8b949e] text-center py-2">
+              {results.length > 0 && onlySelected
+                ? "No results match the selected cities filter"
+                : `No ${label}s found`}
+            </p>
+          )}
+
+          {!mutation.isSuccess && !mutation.isPending && !mutation.isError && (
+            <p className="text-xs text-[#484f58] text-center py-2">
+              Select cities and press Search
+            </p>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function TabBarInline({
+  pathCount, cycleCount, pathPending, cyclePending,
+}: {
+  pathCount: number; cycleCount: number;
+  pathPending: boolean; cyclePending: boolean;
+}) {
+  const activeTab = useTabStore((s) => s.activeTab);
+  const setActiveTab = useTabStore((s) => s.setActiveTab);
+
+  const tabs = [
+    { id: "paths" as const, label: "Paths", count: pathCount, pending: pathPending },
+    { id: "cycles" as const, label: "Cycles", count: cycleCount, pending: cyclePending },
+  ];
+
+  return (
+    <div className="bg-[#0d1117]" style={{ borderTopLeftRadius: "10px", borderTopRightRadius: "10px" }}>
+      <div className="flex items-end px-2 pt-2 gap-0.5">
+        {tabs.map((tab) => {
+          const active = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`relative flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold transition-colors ${
+                active
+                  ? "text-[#58a6ff] bg-black/80 border border-[#30363d] border-b-transparent -mb-px"
+                  : "text-[#484f58] hover:text-[#8b949e] bg-transparent border border-transparent"
+              }`}
+              style={{
+                borderTopLeftRadius: "8px",
+                borderTopRightRadius: "8px",
+                borderBottomLeftRadius: "0",
+                borderBottomRightRadius: "0",
+              }}
+            >
+              {tab.label}
+              {tab.count > 0 && (
+                <span className={`text-[9px] px-1 py-0.5 rounded-full ${
+                  active ? "bg-[#3fb950]/15 text-[#3fb950]" : "bg-[#21262d] text-[#484f58]"
+                }`}>
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <div className="relative h-[2px] bg-[#30363d] overflow-hidden">
+        {(tabs.some((t) => t.pending)) && (
+          <div className="absolute inset-0 shimmer-line" />
         )}
       </div>
     </div>
   );
 }
 
-function PathCard({ path }: { path: PathResult }) {
+function PathCard({
+  result,
+  cityName,
+  pathKey,
+  hopFilters,
+}: {
+  result: PathResult;
+  cityName: (iata: string) => string;
+  pathKey: string;
+  hopFilters: HopFilterValue[];
+}) {
+  const activeTab = useTabStore((s) => s.activeTab);
+  const selectedPaths = usePathStore((s) => s.selectedPaths);
+  const togglePath = usePathStore((s) => s.togglePath);
+  const setMinDays = usePathStore((s) => s.setMinDays);
+  const autoSelectBestDates = usePathStore((s) => s.autoSelectBestDates);
+  const isSelected = selectedPaths.some(
+    (tp) => pathKey_(tp.result) === pathKey && tp.tab === activeTab,
+  );
+
+  const cost = result.total_cost_eur;
+  const costLabel =
+    cost != null
+      ? `${result.is_partial ? "~" : ""}${Math.round(cost)}\u20AC`
+      : "--";
+
+  function handlePriceClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!isSelected) {
+      togglePath(result, activeTab);
+      setMinDays(pathKey, hopFilters.map((hf) => hf.minHours));
+    }
+    autoSelectBestDates(pathKey, result);
+  }
+
   return (
-    <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-2.5">
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-sm font-semibold text-[#3fb950]">
-          EUR {path.total_eur.toFixed(2)}
+    <div
+      onClick={() => {
+        togglePath(result, activeTab);
+        if (!isSelected) {
+          setMinDays(pathKey, hopFilters.map((hf) => hf.minHours));
+        }
+      }}
+      className={`group rounded-lg px-2.5 py-2 transition-all cursor-pointer overflow-x-auto border ${
+        isSelected
+          ? "bg-[#58a6ff]/10 border-[#58a6ff]/30"
+          : "bg-[#0d1117] hover:bg-[#161b22] border-[#21262d] hover:border-[#30363d]"
+      }`}
+    >
+      <div className="flex items-center gap-2 w-max">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => {}}
+          className="accent-[#58a6ff] w-3 h-3 shrink-0 pointer-events-none"
+        />
+        <span
+          onClick={handlePriceClick}
+          className="text-xs font-bold text-[#3fb950] tabular-nums hover:underline hover:text-[#56d364] cursor-pointer"
+          title="Click to highlight cheapest dates"
+        >
+          {costLabel}
         </span>
-        <span className="text-xs text-[#484f58]">
-          {path.legs.length} {path.legs.length === 1 ? "leg" : "legs"}
-        </span>
-      </div>
-      <div className="flex items-center gap-1 flex-wrap">
-        {path.cities.map((city, i) => {
-          const leg = i < path.legs.length ? path.legs[i] : null;
+
+        {result.path.map((iata, i) => {
+          const leg = i < result.legs.length ? result.legs[i] : null;
           const color = leg
-            ? AIRLINE_META[leg.airline]?.color || "#58a6ff"
-            : "#58a6ff";
+            ? AIRLINE_META[leg.airline]?.color || "#8b949e"
+            : "#8b949e";
           return (
-            <span key={i} className="flex items-center gap-1">
-              <span className="text-xs font-mono text-[#c9d1d9] font-medium">
-                {city}
+            <span key={i} className="inline-flex items-center gap-0.5">
+              <span
+                className="text-[10px] text-[#c9d1d9] font-medium whitespace-nowrap"
+                title={`${cityName(iata)} (${iata})`}
+              >
+                {cityName(iata)}
               </span>
-              {i < path.cities.length - 1 && (
-                <ArrowRight size={10} style={{ color }} />
+              {i < result.path.length - 1 && (
+                <span className="text-[10px] font-bold" style={{ color }}>
+                  {"\u2192"}
+                </span>
               )}
             </span>
           );

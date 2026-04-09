@@ -103,12 +103,12 @@ export default function FlightPopup({
               className="flex items-center justify-between px-4 py-3 border-b border-[#30363d]/50 hover:bg-[#0d1117]/50 transition-colors"
             >
               <div>
-                <span className="text-sm text-[#c9d1d9]">{fare.date}</span>
+                <span className="text-sm text-[#c9d1d9]">{fare.departure_date}</span>
               </div>
               <div className="flex items-center gap-3">
                 <div className="text-right">
                   <span className="text-sm font-semibold text-[#3fb950]">
-                    EUR {fare.price_eur.toFixed(2)}
+                    EUR {fare.price_eur != null ? Number(fare.price_eur).toFixed(2) : "--"}
                   </span>
                   {fare.currency !== "EUR" && (
                     <span className="text-xs text-[#8b949e] ml-1.5">

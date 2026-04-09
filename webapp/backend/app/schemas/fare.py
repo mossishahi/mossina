@@ -1,6 +1,6 @@
 """Fare API schemas."""
 
-from datetime import date
+from datetime import date, time
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,6 +15,8 @@ class FareOut(BaseModel):
     currency: str
     airline: str
     flight_number: str | None = None
+    departure_time: str | None = None
+    arrival_time: str | None = None
 
 
 class RouteFaresOut(BaseModel):

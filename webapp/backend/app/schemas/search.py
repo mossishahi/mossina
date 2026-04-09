@@ -34,6 +34,7 @@ class PathLeg(BaseModel):
     destination: str
     airline: str
     cost_eur: float | None = None
+    best_date: str | None = None
 
 
 class PathResult(BaseModel):

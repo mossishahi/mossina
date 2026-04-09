@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
-import { Calendar, X } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { useFilterStore } from "@/stores/filterStore";
+import { useMapStore } from "@/stores/mapStore";
 
 function toISODate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -8,73 +8,65 @@ function toISODate(d: Date): string {
 
 export default function TimeFrame() {
   const { dateFrom, dateTo, setDateRange, clearDateRange } = useFilterStore();
+  const clearSelection = useMapStore((s) => s.clearSelection);
 
   const today = toISODate(new Date());
-  const oneWeek = toISODate(
-    new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-  );
+  const oneWeek = toISODate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
 
-  const [from, setFrom] = useState(dateFrom || today);
-  const [to, setTo] = useState(dateTo || oneWeek);
+  const from = dateFrom || today;
+  const to = dateTo || oneWeek;
 
-  useEffect(() => {
-    if (dateFrom) setFrom(dateFrom);
-    if (dateTo) setTo(dateTo);
-  }, [dateFrom, dateTo]);
-
-  function handleApply() {
-    setDateRange(from, to);
+  function handleFromChange(val: string) {
+    const newTo = to < val ? val : to;
+    setDateRange(val, newTo);
   }
 
-  function handleClear() {
+  function handleToChange(val: string) {
+    setDateRange(from, val);
+  }
+
+  function handleResetAll() {
+    clearSelection();
     clearDateRange();
-    setFrom(today);
-    setTo(oneWeek);
+    // Re-enable all airlines
+    useMapStore.setState({ activeAirlines: new Set(["FR", "W6"]) });
   }
 
   return (
-    <div>
-      <h3 className="text-xs font-medium text-[#8b949e] uppercase tracking-wider mb-2 flex items-center gap-1.5">
-        <Calendar size={12} />
-        Time Frame
-      </h3>
-      <div className="space-y-2">
-        <div className="flex gap-2">
-          <div className="flex-1">
-            <label className="text-xs text-[#484f58] block mb-1">From</label>
-            <input
-              type="date"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-              className="w-full bg-[#161b22] border border-[#30363d] rounded-lg py-1.5 px-2 text-sm text-[#c9d1d9] focus:outline-none focus:border-[#58a6ff] transition-colors [color-scheme:dark]"
-            />
-          </div>
-          <div className="flex-1">
-            <label className="text-xs text-[#484f58] block mb-1">To</label>
-            <input
-              type="date"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              className="w-full bg-[#161b22] border border-[#30363d] rounded-lg py-1.5 px-2 text-sm text-[#c9d1d9] focus:outline-none focus:border-[#58a6ff] transition-colors [color-scheme:dark]"
-            />
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={handleApply}
-            className="flex-1 py-1.5 bg-[#238636] hover:bg-[#2ea043] text-white text-sm font-medium rounded-lg transition-colors"
-          >
-            Apply
-          </button>
-          <button
-            onClick={handleClear}
-            className="px-3 py-1.5 bg-[#161b22] hover:bg-[#30363d] text-[#8b949e] text-sm border border-[#30363d] rounded-lg transition-colors flex items-center gap-1"
-          >
-            <X size={12} />
-            Clear
-          </button>
-        </div>
+    <div className="flex items-center gap-1.5">
+      <div className="relative flex-1">
+        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-[#484f58] pointer-events-none">
+          From
+        </span>
+        <input
+          type="date"
+          value={from}
+          min={today}
+          onChange={(e) => handleFromChange(e.target.value)}
+          onClick={(e) => { try { (e.target as HTMLInputElement).showPicker(); } catch {} }}
+          className="w-full bg-[#0d1117] border border-[#30363d] rounded-md py-1.5 pl-10 pr-1 text-[11px] text-[#c9d1d9] focus:outline-none focus:border-[#58a6ff] transition-colors [color-scheme:dark] cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+        />
       </div>
+      <div className="relative flex-1">
+        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-[#484f58] pointer-events-none">
+          To
+        </span>
+        <input
+          type="date"
+          value={to}
+          min={from}
+          onChange={(e) => handleToChange(e.target.value)}
+          onClick={(e) => { try { (e.target as HTMLInputElement).showPicker(); } catch {} }}
+          className="w-full bg-[#0d1117] border border-[#30363d] rounded-md py-1.5 pl-7 pr-1 text-[11px] text-[#c9d1d9] focus:outline-none focus:border-[#58a6ff] transition-colors [color-scheme:dark] cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+        />
+      </div>
+      <button
+        onClick={handleResetAll}
+        title="Reset all filters"
+        className="shrink-0 p-1.5 rounded-md border border-[#30363d] text-[#8b949e] hover:text-[#e5534b] hover:border-[#e5534b]/40 transition-colors"
+      >
+        <RotateCcw size={12} />
+      </button>
     </div>
   );
 }

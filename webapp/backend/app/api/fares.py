@@ -1,14 +1,14 @@
 """Fare listing and cheapest-per-date endpoints."""
 
-from datetime import date
+from datetime import date as date_type
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import ExchangeRate, Fare
+from app.models import ExchangeRate, Fare, Schedule
 from app.schemas.fare import FareOut, RouteFaresOut
 
 router = APIRouter(prefix="/fares", tags=["fares"])
@@ -30,7 +30,18 @@ def _price_to_eur(price: Decimal, currency: str, rates: dict[str, Decimal]) -> D
     return price * rate
 
 
-def _fare_to_out(f: Fare, rates: dict[str, Decimal]) -> FareOut:
+def _fare_to_out(
+    f: Fare,
+    rates: dict[str, Decimal],
+    schedule_times: dict | None = None,
+) -> FareOut:
+    dep_time = None
+    arr_time = None
+    if schedule_times and f.flight_number and f.departure_date:
+        key = (f.flight_number, str(f.departure_date))
+        times = schedule_times.get(key)
+        if times:
+            dep_time, arr_time = times
     return FareOut(
         departure_date=f.departure_date,
         price=f.price,
@@ -38,6 +49,8 @@ def _fare_to_out(f: Fare, rates: dict[str, Decimal]) -> FareOut:
         currency=f.currency,
         airline=f.airline,
         flight_number=f.flight_number,
+        departure_time=dep_time,
+        arrival_time=arr_time,
     )
 
 
@@ -45,8 +58,8 @@ def _fare_to_out(f: Fare, rates: dict[str, Decimal]) -> FareOut:
 async def cheapest_fares_on_route(
     origin: str,
     destination: str,
-    date_from: date | None = Query(None),
-    date_to: date | None = Query(None),
+    date_from: date_type | None = Query(None),
+    date_to: date_type | None = Query(None),
     airline: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
@@ -54,7 +67,10 @@ async def cheapest_fares_on_route(
     d = destination.strip().upper()
     rates = await _load_rates_map(db)
 
-    stmt = select(Fare).where(Fare.origin == o, Fare.destination == d).order_by(
+    stmt = select(Fare).where(
+        Fare.origin == o, Fare.destination == d, Fare.price > 0,
+        Fare.departure_date >= func.current_date(),
+    ).order_by(
         Fare.departure_date, Fare.price
     )
     if date_from is not None:
@@ -85,8 +101,8 @@ async def cheapest_fares_on_route(
 async def fares_for_route(
     origin: str,
     destination: str,
-    date_from: date | None = Query(None),
-    date_to: date | None = Query(None),
+    date_from: date_type | None = Query(None),
+    date_to: date_type | None = Query(None),
     airline: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
@@ -94,7 +110,10 @@ async def fares_for_route(
     d = destination.strip().upper()
     rates = await _load_rates_map(db)
 
-    stmt = select(Fare).where(Fare.origin == o, Fare.destination == d).order_by(
+    stmt = select(Fare).where(
+        Fare.origin == o, Fare.destination == d, Fare.price > 0,
+        Fare.departure_date >= func.current_date(),
+    ).order_by(
         Fare.departure_date, Fare.airline, Fare.price
     )
     if date_from is not None:
@@ -105,7 +124,26 @@ async def fares_for_route(
         stmt = stmt.where(Fare.airline == airline.strip().upper())
 
     rows = (await db.scalars(stmt)).all()
-    outs = [_fare_to_out(f, rates) for f in rows]
+
+    sched_stmt = select(
+        Schedule.flight_number,
+        Schedule.departure_date,
+        Schedule.departure_time,
+        Schedule.arrival_time,
+    ).where(Schedule.origin == o, Schedule.destination == d)
+    if date_from is not None:
+        sched_stmt = sched_stmt.where(Schedule.departure_date >= date_from)
+    if date_to is not None:
+        sched_stmt = sched_stmt.where(Schedule.departure_date <= date_to)
+    sched_rows = await db.execute(sched_stmt)
+    schedule_times: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+    for fn, dep_d, dep_t, arr_t in sched_rows.all():
+        if fn and dep_d:
+            dt_str = dep_t.strftime("%H:%M") if dep_t else None
+            at_str = arr_t.strftime("%H:%M") if arr_t else None
+            schedule_times[(fn, str(dep_d))] = (dt_str, at_str)
+
+    outs = [_fare_to_out(f, rates, schedule_times) for f in rows]
     eur_values = [x.price_eur for x in outs if x.price_eur is not None]
     cheapest = min(eur_values) if eur_values else None
 

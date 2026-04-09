@@ -8,33 +8,30 @@ export default function AirlineFilter() {
   const toggleAirline = useMapStore((s) => s.toggleAirline);
 
   return (
-    <div>
-      <h3 className="text-xs font-medium text-[#8b949e] uppercase tracking-wider mb-2">
+    <div className="flex items-center gap-3">
+      <span className="text-xs font-medium text-[#8b949e] uppercase tracking-wider shrink-0">
         Airlines
-      </h3>
-      <div className="flex gap-2">
-        {AIRLINES.map(([code, meta]) => {
-          const active = activeAirlines.has(code);
-          return (
-            <button
-              key={code}
-              onClick={() => toggleAirline(code)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm border transition-all"
-              style={{
-                borderColor: active ? meta.color : "#30363d",
-                backgroundColor: active ? `${meta.color}20` : "transparent",
-                color: active ? meta.color : "#8b949e",
-              }}
+      </span>
+      {AIRLINES.map(([code, meta]) => {
+        const active = activeAirlines.has(code);
+        return (
+          <label key={code} className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={active}
+              onChange={() => toggleAirline(code)}
+              className="w-3 h-3 rounded"
+              style={{ accentColor: meta.color }}
+            />
+            <span
+              className="text-[11px] font-medium"
+              style={{ color: active ? meta.color : "#484f58" }}
             >
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: meta.color, opacity: active ? 1 : 0.4 }}
-              />
               {meta.name}
-            </button>
-          );
-        })}
-      </div>
+            </span>
+          </label>
+        );
+      })}
     </div>
   );
 }

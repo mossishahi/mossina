@@ -24,10 +24,14 @@ export interface Route {
 }
 
 export interface Fare {
-  date: string;
+  departure_date: string;
   price: number;
   currency: string;
-  price_eur: number;
+  price_eur: number | null;
+  airline: string;
+  flight_number: string | null;
+  departure_time: string | null;
+  arrival_time: string | null;
 }
 
 export interface RouteFares {
@@ -41,21 +45,21 @@ export interface PathLeg {
   origin: string;
   destination: string;
   airline: string;
-  date: string;
-  price: number;
-  currency: string;
-  price_eur: number;
+  cost_eur: number | null;
+  best_date: string | null;
 }
 
 export interface PathResult {
+  path: string[];
   legs: PathLeg[];
-  total_eur: number;
-  cities: string[];
+  total_cost_eur: number | null;
+  is_partial: boolean;
 }
 
 export interface SearchResponse {
-  paths: PathResult[];
-  elapsed_seconds: number;
+  results: PathResult[];
+  count: number;
+  search_time_ms: number;
 }
 
 export interface AirlineInfo {

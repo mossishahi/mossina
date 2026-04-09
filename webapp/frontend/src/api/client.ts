@@ -20,10 +20,11 @@ export async function getAirports(): Promise<Airport[]> {
 }
 
 export async function searchAirports(q: string): Promise<Airport[]> {
-  const { data } = await api.get<Airport[]>("/airports/search", {
-    params: { q },
-  });
-  return data;
+  const { data } = await api.get<{ airports: Airport[]; countries: unknown[] }>(
+    "/airports/search",
+    { params: { q } },
+  );
+  return data.airports;
 }
 
 export async function getRoutes(filters?: {

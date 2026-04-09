@@ -1,8 +1,9 @@
 import { useState } from "react";
 import Globe from "./components/Globe/Globe";
 import Sidebar from "./components/Sidebar/Sidebar";
-import FlightPopup from "./components/FlightPopup/FlightPopup";
 import Pathfinder from "./components/Pathfinder/Pathfinder";
+import RouteDetail from "./components/RouteDetail/RouteDetail";
+import FlightPopup from "./components/FlightPopup/FlightPopup";
 
 export default function App() {
   const [flightPopup, setFlightPopup] = useState<{
@@ -11,21 +12,18 @@ export default function App() {
     airline: string;
   } | null>(null);
 
-  const [showPathfinder, setShowPathfinder] = useState(false);
-
   return (
     <div className="relative w-full h-full">
       <Globe onArcClick={(origin, destination, airline) =>
         setFlightPopup({ origin, destination, airline })
       } />
 
-      <Sidebar
-        onOpenPathfinder={() => setShowPathfinder(true)}
-      />
+      <div className="absolute top-4 left-4 bottom-4 w-[420px] overflow-y-auto z-10 space-y-2 pr-1">
+        <Sidebar />
+        <Pathfinder />
+      </div>
 
-      {showPathfinder && (
-        <Pathfinder onClose={() => setShowPathfinder(false)} />
-      )}
+      <RouteDetail />
 
       {flightPopup && (
         <FlightPopup
