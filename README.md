@@ -1,110 +1,182 @@
-## mossina
+# Mossina
 
-Interactive flight route network explorer for Ryanair and Wizz Air.
+Interactive multi-airline flight route explorer and trip planner. Search for the cheapest multi-hop paths and round-trip cycles across Ryanair and Wizz Air networks, with sequential date-aware pricing and real-time fare lookups.
 
-### Quick start
+## Architecture
+
+The project is split into three independent services sharing a PostgreSQL database:
+
+```
+scraper/          Standalone data ingestion (Ryanair + Wizz Air APIs)
+webapp/backend/   FastAPI REST API (async, SQLAlchemy 2.0, Alembic)
+webapp/frontend/  React 18 + TypeScript + Vite + Tailwind + react-globe.gl
+```
+
+## Quick Start (Local Development)
+
+### Prerequisites
+
+- Docker (for PostgreSQL)
+- Python 3.11+
+- Node.js 20+
+
+### 1. Start PostgreSQL
 
 ```bash
-# 1. Clone and set up
-git clone <repo-url> && cd ryanair_scraper
-python3 -m venv .venv && source .venv/bin/activate
+cp .env.example .env
+docker compose up db -d
+```
+
+### 2. Run database migrations
+
+```bash
+cd webapp/backend
 pip install -r requirements.txt
-
-# 2. Place data (see "Using a shared data folder" below)
-
-# 3. Run the app
-python serve.py
+DATABASE_URL_SYNC="postgresql+psycopg2://mossina:mossina@localhost:5432/mossina" \
+  alembic upgrade head
 ```
 
-The app opens automatically at `http://127.0.0.1:8080`.
+### 3. Migrate existing data (optional)
 
-### Running the app
+If you have an existing SQLite `data/flights.db`:
 
 ```bash
-python serve.py                          # default: http://127.0.0.1:8080
-python serve.py --port 9000              # custom port
-python serve.py --no-browser             # don't auto-open the browser
-python serve.py --schedule 03:00         # daily auto-update at 3 AM
+python scripts/migrate_sqlite_to_pg.py
 ```
 
-The page is rendered live from the database on every request — no
-static files to generate or keep in sync.
-
-#### Updating prices
-
-**Manual (from the UI):** Click **"Fetch latest prices"** in the Update
-Prices panel.  Select which airlines and cities to update, then watch
-real-time progress with ETA.  Hit **Stop** any time — partial data is
-saved.
-
-**Automatic (daily schedule):** Add `--schedule HH:MM` when starting
-the server.  A background thread runs a full update at the specified
-local time every day:
+### 4. Start the backend
 
 ```bash
-python serve.py --schedule 03:00         # update all airlines at 3 AM
+cd webapp/backend
+DATABASE_URL="postgresql+asyncpg://mossina:mossina@localhost:5432/mossina" \
+CORS_ORIGINS='["http://localhost:3000","http://localhost:5173"]' \
+  uvicorn app.main:app --reload --port 8000
 ```
 
-**One-off CLI (for cron / systemd):** Run the updater as a standalone
-script — it updates, logs progress, and exits:
+### 5. Start the frontend
 
 ```bash
-python -m src.update_worker                          # all airlines, all routes
-python -m src.update_worker --airlines FR             # Ryanair only
-python -m src.update_worker --origins FMM,NUE         # only routes touching FMM/NUE
-python -m src.update_worker --airlines W6 --origins NUE
+cd webapp/frontend
+npm install
+npm run dev
 ```
 
-Example crontab entry for a daily 3 AM update:
+Open **http://localhost:5173**
 
-```cron
-0 3 * * * cd /path/to/ryanair_scraper && .venv/bin/python -m src.update_worker >> logs/update.log 2>&1
-```
-
-### Using a shared `data` folder
-
-The repository does **not** include the SQLite database in git. If
-someone sends you a pre-populated `data` folder (containing
-`flights.db`), you have two options:
-
-- **Simplest**: drop the `data` folder directly inside the cloned repo
-  so you end up with `ryanair_scraper/data/flights.db`.
-
-- **Alternative location**: point the app to data stored elsewhere via
-  environment variables:
-  - **`MOSSINA_DATA_DIR`** — directory that contains `flights.db`
-  - **`MOSSINA_DB_PATH`** — full path to `flights.db` (overrides
-    `MOSSINA_DATA_DIR`)
-
-  ```bash
-  export MOSSINA_DATA_DIR=/path/to/shared/data
-  python serve.py
-  ```
-
-### Scraping fresh data
-
-If you want to build the database from scratch instead of using a
-shared one:
+### Quick commands (Makefile)
 
 ```bash
-python scrape.py                          # full scrape (all airlines)
-python scrape.py --airline FR             # Ryanair only
-python scrape.py --airline W6             # Wizz Air only
-python scrape.py --availability-only --airline FR --origins FMM,NUE
+make dev-db       # Start PostgreSQL
+make migrate      # Run Alembic migrations
+make backend      # Start FastAPI (port 8000)
+make frontend     # Start Vite dev server (port 5173)
+make scraper      # Run scraper (Docker, on-demand)
+make clean        # Tear down everything
 ```
 
-See `python scrape.py --help` for all options.
+## Features
 
-#### Wizz Air proxy setup
+### Interactive Globe
+- 3D globe visualization with country borders
+- Airport nodes colored by selection state
+- Route arcs colored by airline (Ryanair blue, Wizz Air magenta)
+- Double-click to zoom, auto-rotate when idle
+- Selected trip arcs highlighted on the globe
 
-Wizz Air's API is behind bot protection that blocks datacenter IPs.
-If you're running the scraper on a server (not your laptop), set a
-residential proxy via the `PROXY_URL` environment variable:
+### Route Finder
+- **Paths**: find cheapest A-to-B routes with up to N hops
+- **Cycles**: find cheapest round trips returning to origin
+- Sequential date-aware pricing (each leg departs after the previous one + configurable min stay)
+- Results grouped by hop count, sorted by total EUR cost
+- Hop filters: constrain intermediate cities and minimum stay per stop
+
+### Trip Planner (Route Detail Panel)
+- Select any path/cycle to open it as a trip in the detail column
+- Each segment expands to show available flights with departure/arrival times
+- Click the price to auto-highlight the cheapest valid date combination
+- Date constraints cascade: picking a date for segment 1 filters segment 2 to show only later dates
+- Direct booking links to Ryanair and Wizz Air websites
+
+### Search & Filter
+- Fuzzy search for airports, cities, and countries
+- Airline toggle (Ryanair / Wizz Air)
+- Date range filter with calendar picker (past dates blocked)
+- "Only selected cities" post-search filter
+- Reset button to clear all filters at once
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Health check |
+| GET | `/api/airports` | List all airports |
+| GET | `/api/airports/search?q=` | Fuzzy search |
+| GET | `/api/routes` | All routes |
+| GET | `/api/fares/{from}/{to}` | Fares with flight times |
+| POST | `/api/search/paths` | Path search (DFS + DP pricing) |
+| POST | `/api/search/cycles` | Cycle search |
+| GET | `/api/airlines` | Airline metadata |
+| POST | `/api/exchange-rates/refresh` | Refresh EUR rates |
+
+## Scraper
+
+The scraper is a separate service that populates the database.
 
 ```bash
-export PROXY_URL="http://user:pass@proxy-host:port"
-python scrape.py --airline W6
+# Run via Docker
+docker compose run --rm scraper
+
+# Or directly
+cd scraper
+pip install -r requirements.txt
+python cli.py                          # all airlines
+python cli.py --airline FR             # Ryanair only
+python cli.py --airline W6             # Wizz Air only
+python cli.py --airline W6 --workers 4 # parallel Wizz Air sessions
 ```
 
-Any HTTP/SOCKS5 residential proxy works. The proxy is only used for
-Wizz Air traffic — Ryanair requests go direct.
+### Wizz Air + ScrapFly
+
+Wizz Air's API is behind bot protection. On servers, set `SCRAPFLY_API_KEY` to route requests through ScrapFly:
+
+```bash
+export SCRAPFLY_API_KEY="your-key"
+python cli.py --airline W6
+```
+
+From residential IPs (laptops), direct access works without ScrapFly.
+
+## Docker Compose (Production)
+
+```bash
+docker compose up -d           # PostgreSQL + backend + frontend (nginx)
+docker compose run --rm scraper  # One-off scrape
+```
+
+Services:
+- `db`: PostgreSQL 16 (port 5432, 256MB shared memory)
+- `backend`: FastAPI (port 8000)
+- `frontend`: Vite build served by nginx (port 3000)
+- `scraper`: on-demand data ingestion (profile: scraper)
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Database | PostgreSQL 16 |
+| Backend | FastAPI, SQLAlchemy 2.0 (async), Alembic, Pydantic v2 |
+| Frontend | React 18, TypeScript, Vite, Tailwind CSS |
+| Globe | react-globe.gl, Three.js |
+| State | Zustand, TanStack Query |
+| Scraping | requests, ScrapFly (optional), ThreadPoolExecutor |
+| Exchange rates | open.er-api.com (free, fetched on demand) |
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | `postgresql+asyncpg://mossina:mossina@db:5432/mossina` | Async DB URL (backend) |
+| `DATABASE_URL_SYNC` | `postgresql+psycopg2://mossina:mossina@db:5432/mossina` | Sync DB URL (Alembic, scraper) |
+| `CORS_ORIGINS` | `["http://localhost:3000"]` | Allowed CORS origins |
+| `SCRAPFLY_API_KEY` | (none) | ScrapFly key for Wizz Air scraping |
+| `WIZZAIR_API_URL` | (auto-discovered) | Override Wizz Air API base URL |
