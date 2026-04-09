@@ -7,4 +7,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["python", "cli.py"]
+CMD ["python", "cli.py", "--loop", "--interval", "60"]

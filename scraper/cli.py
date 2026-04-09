@@ -2,18 +2,53 @@
 """CLI entry point for the scraper service.
 
 Usage:
-    python cli.py                        # scrape all airlines
-    python cli.py --airline FR           # Ryanair only
-    python cli.py --airline W6 -r 3      # Wizzair, refresh if >3 days old
-    python cli.py -a all --workers 4     # all airlines, 4 parallel workers
+    python cli.py                           # scrape once, all airlines
+    python cli.py --airline FR              # Ryanair only
+    python cli.py --airline W6 -r 3         # Wizzair, refresh if >3 days old
+    python cli.py --loop --interval 60      # continuous: scrape every 60 minutes
+    python cli.py --loop --interval 30 -a W6  # Wizzair every 30 minutes
 """
 
 import argparse
 import sys
+import time
 
 from src.config import setup_logging
 from src.database import SessionLocal
 from src.scrapers import get_airline, list_airlines
+
+
+def run_scrape(args, log):
+    """Run a single scrape pass for the configured airlines."""
+    session = SessionLocal()
+    try:
+        if args.airline.lower() == "all":
+            codes = [code for code, _ in list_airlines()]
+        else:
+            codes = [args.airline.upper()]
+
+        for code in codes:
+            airline = get_airline(code)
+            log.info("=== %s (%s) ===", airline["name"], code)
+
+            log.info("Scraping airports ...")
+            airports = airline["scrape_airports"](session)
+
+            log.info("Scraping routes ...")
+            airline["scrape_routes"](session, airports)
+
+            log.info("Scraping schedules ...")
+            airline["scrape_schedules"](
+                session,
+                limit=args.limit,
+                days_fresh=args.refresh_days,
+                workers=args.workers,
+            )
+
+    except Exception:
+        log.exception("Scrape pass failed")
+    finally:
+        session.close()
 
 
 def main():
@@ -40,46 +75,48 @@ def main():
         type=int, default=None,
         help="Max routes to scrape (default: no limit)",
     )
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="Run continuously, repeating every --interval minutes",
+    )
+    parser.add_argument(
+        "--interval",
+        type=int, default=60,
+        help="Minutes between scrape passes when --loop is set (default: 60)",
+    )
     args = parser.parse_args()
 
     log = setup_logging()
-    session = SessionLocal()
 
-    try:
-        if args.airline.lower() == "all":
-            codes = [code for code, _ in list_airlines()]
-        else:
-            codes = [args.airline.upper()]
+    if not args.loop:
+        run_scrape(args, log)
+        log.info("Done.")
+        return
 
-        for code in codes:
-            airline = get_airline(code)
-            log.info("=== %s (%s) ===", airline["name"], code)
+    log.info("Starting continuous scraper (every %d minutes)", args.interval)
+    cycle = 0
+    while True:
+        cycle += 1
+        log.info("--- Scrape cycle %d ---", cycle)
+        t0 = time.time()
+        run_scrape(args, log)
+        elapsed = time.time() - t0
+        log.info("Cycle %d finished in %.1f minutes", cycle, elapsed / 60)
 
-            log.info("Scraping airports ...")
-            airports = airline["scrape_airports"](session)
-
-            log.info("Scraping routes ...")
-            airline["scrape_routes"](session, airports)
-
-            log.info("Scraping schedules ...")
-            airline["scrape_schedules"](
-                session,
-                limit=args.limit,
-                days_fresh=args.refresh_days,
-                workers=args.workers,
-            )
-
-    except KeyboardInterrupt:
-        log.info("Interrupted by user.")
-        sys.exit(130)
-    except Exception:
-        log.exception("Scraper failed")
-        sys.exit(1)
-    finally:
-        session.close()
-
-    log.info("Done.")
+        wait = max(0, args.interval * 60 - elapsed)
+        if wait > 0:
+            log.info("Sleeping %.0f minutes until next cycle ...", wait / 60)
+            try:
+                time.sleep(wait)
+            except KeyboardInterrupt:
+                log.info("Interrupted. Exiting.")
+                break
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nInterrupted.")
+        sys.exit(130)
