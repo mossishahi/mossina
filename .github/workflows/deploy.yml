@@ -48,9 +48,21 @@ jobs:
             grep -q SCRAPFLY_API_KEY .env || echo "SCRAPFLY_API_KEY=${SCRAPFLY_API_KEY}" >> .env
             sed -i "s|^SCRAPFLY_API_KEY=.*|SCRAPFLY_API_KEY=${SCRAPFLY_API_KEY}|" .env
 
-            echo "==> Building and deploying services..."
-            docker compose build
-            docker compose up -d db backend frontend
+            echo "==> Stopping scrapers if running (avoid OOM during build)..."
+            docker stop scraper_fr scraper_w6 2>/dev/null || true
+            docker rm scraper_fr scraper_w6 2>/dev/null || true
+
+            echo "==> Building backend + scraper..."
+            docker compose --profile scraper build backend scraper
+
+            echo "==> Starting backend..."
+            docker compose up -d db backend
+
+            echo "==> Building frontend (memory-intensive)..."
+            docker compose build frontend
+
+            echo "==> Starting frontend..."
+            docker compose up -d frontend
 
             echo "==> Waiting for backend health..."
             sleep 10
