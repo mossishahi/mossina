@@ -41,6 +41,7 @@ export default function Pathfinder() {
 
   const pathMutation = useSearchPaths();
   const cycleMutation = useSearchCycles();
+  const lastSearchRef = useRef<{ from: string; to: string; cities: string[]; airline?: string } | null>(null);
 
   const prevCitiesRef = useRef(selectedCities);
   useEffect(() => {
@@ -75,6 +76,9 @@ export default function Pathfinder() {
     clearPaths();
     setSearchActive(true);
 
+    const al = activeAirlines.size === 1 ? [...activeAirlines][0] : undefined;
+    lastSearchRef.current = { from, to, cities, airline: al };
+
     pathMutation.mutate({
       origins: cities,
       destinations: cities,
@@ -82,7 +86,7 @@ export default function Pathfinder() {
       date_from: from,
       date_to: to,
       only_selected: false,
-      airline: activeAirlines.size === 1 ? [...activeAirlines][0] : undefined,
+      airline: al,
     });
 
     cycleMutation.mutate({
@@ -152,14 +156,41 @@ export default function Pathfinder() {
     return Array.from({ length: n }, () => emptyLeg());
   }
 
+  const [repricing, setRepricing] = useState(false);
+  const repricingTimer = useRef<ReturnType<typeof setTimeout>>();
+
   const updateHopFilter = useCallback((length: number, stopIdx: number, val: HopFilterValue) => {
     setHopFilters((prev) => {
       const current = prev[length] || Array.from({ length: length + 1 }, () => emptyHop());
       const next = [...current];
       next[stopIdx] = val;
+
+      const hasDays = next.some((h) => h.minDays != null || h.maxDays != null);
+      if (hasDays && lastSearchRef.current) {
+        clearTimeout(repricingTimer.current);
+        setRepricing(true);
+        const hopConstraints = next.map((h) => ({
+          min_stay_days: h.minDays,
+          max_stay_days: h.maxDays,
+          include_cities: h.includeCities.length > 0 ? h.includeCities : null,
+          exclude_cities: h.excludeCities.length > 0 ? h.excludeCities : null,
+        }));
+        repricingTimer.current = setTimeout(() => {
+          const s = lastSearchRef.current!;
+          const mutation = isCycle ? cycleMutation : pathMutation;
+          const base = isCycle
+            ? { origins: s.cities, max_hops: maxHops, date_from: s.from, date_to: s.to, only_selected: false }
+            : { origins: s.cities, destinations: s.cities, max_hops: maxHops, date_from: s.from, date_to: s.to, only_selected: false, airline: s.airline };
+          mutation.mutate(
+            { ...base, hop_filters: hopConstraints } as any,
+            { onSettled: () => setRepricing(false) },
+          );
+        }, 600);
+      }
+
       return { ...prev, [length]: next };
     });
-  }, []);
+  }, [isCycle, maxHops]);
 
   const updateLegFilter = useCallback((length: number, legIdx: number, val: LegFilterValue) => {
     setLegFilters((prev) => {
@@ -229,7 +260,12 @@ export default function Pathfinder() {
           )}
 
           {results.length > 0 && (
-            <div>
+            <div className={`relative ${repricing ? "opacity-50 pointer-events-none" : ""}`}>
+              {repricing && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center">
+                  <span className="text-[10px] text-[#58a6ff] bg-[#0d1117]/80 px-3 py-1 rounded-full">Recalculating prices…</span>
+                </div>
+              )}
               <div className="pb-2 space-y-1.5">
                 <p className="text-[11px] text-[#484f58]">
                   {filtered.length}
