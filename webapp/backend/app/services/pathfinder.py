@@ -366,6 +366,7 @@ async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResp
     results: list[PathResult] = []
     node_visits = 0
     timed_out = False
+    found_at_depth: set[tuple[str, ...]] = set()
 
     def over_budget() -> bool:
         nonlocal timed_out
@@ -385,20 +386,25 @@ async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResp
         path_nodes: list[str],
         path_edges: list[tuple[str, str, str]],
         visited: set[str],
+        depth_limit: int,
     ) -> None:
         nonlocal node_visits
         node_visits += 1
         if over_budget():
             return
         if current in dest_set and len(path_edges) >= 1:
-            last_hop_idx = len(path_nodes) - 1
-            if _hop_ok(current, last_hop_idx, hop_filters):
-                interiors_ok = (not request.only_selected) or all(
-                    x in allowed_intermediate for x in path_nodes[1:-1]
-                )
-                if interiors_ok:
-                    results.append(_build_path_result(path_nodes, path_edges, leg_fares, hop_filters))
-        if len(path_edges) >= request.max_hops:
+            if len(path_edges) == depth_limit:
+                sig = tuple(path_nodes)
+                if sig not in found_at_depth:
+                    last_hop_idx = len(path_nodes) - 1
+                    if _hop_ok(current, last_hop_idx, hop_filters):
+                        interiors_ok = (not request.only_selected) or all(
+                            x in allowed_intermediate for x in path_nodes[1:-1]
+                        )
+                        if interiors_ok:
+                            found_at_depth.add(sig)
+                            results.append(_build_path_result(path_nodes, path_edges, leg_fares, hop_filters))
+        if len(path_edges) >= depth_limit:
             return
         leg_idx = len(path_edges)
         for nxt, airline in adj.get(current, []):
@@ -418,17 +424,20 @@ async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResp
                     continue
             next_edges = path_edges + [(current, nxt, airline)]
             visited.add(nxt)
-            dfs_path(nxt, next_nodes, next_edges, visited)
+            dfs_path(nxt, next_nodes, next_edges, visited, depth_limit)
             visited.remove(nxt)
 
-    for origin in sorted(origins_set):
+    for depth in range(1, request.max_hops + 1):
         if over_budget():
             break
-        if origin not in adj and origin not in all_nodes:
-            continue
-        if not _hop_ok(origin, 0, hop_filters):
-            continue
-        dfs_path(origin, [origin], [], {origin})
+        for origin in sorted(origins_set):
+            if over_budget():
+                break
+            if origin not in adj and origin not in all_nodes:
+                continue
+            if not _hop_ok(origin, 0, hop_filters):
+                continue
+            dfs_path(origin, [origin], [], {origin}, depth)
 
     results = [r for r in results if not r.is_partial]
     results.sort(key=_sort_key_cost)
@@ -480,6 +489,7 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
         path_nodes: list[str],
         path_edges: list[tuple[str, str, str]],
         visited: set[str],
+        depth_limit: int,
     ) -> None:
         nonlocal node_visits
         node_visits += 1
@@ -493,7 +503,7 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
                 continue
             if nxt == start and len(path_edges) >= 1:
                 total_edges = len(path_edges) + 1
-                if total_edges > request.max_hops:
+                if total_edges != depth_limit:
                     continue
                 full_nodes = path_nodes + [start]
                 if request.only_selected:
@@ -512,7 +522,7 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
             nxt_hop_idx = len(path_nodes)
             if not _hop_ok(nxt, nxt_hop_idx, hop_filters):
                 continue
-            if len(path_edges) + 1 >= request.max_hops:
+            if len(path_edges) + 1 >= depth_limit:
                 continue
             if request.only_selected:
                 if nxt not in allowed_intermediate:
@@ -520,17 +530,20 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
             next_nodes = path_nodes + [nxt]
             next_edges = path_edges + [(current, nxt, airline)]
             visited.add(nxt)
-            dfs_cycle(start, nxt, next_nodes, next_edges, visited)
+            dfs_cycle(start, nxt, next_nodes, next_edges, visited, depth_limit)
             visited.remove(nxt)
 
-    for start in sorted(origins_set):
+    for depth in range(2, request.max_hops + 1):
         if over_budget():
             break
-        if start not in adj:
-            continue
-        if not _hop_ok(start, 0, hop_filters):
-            continue
-        dfs_cycle(start, start, [start], [], {start})
+        for start in sorted(origins_set):
+            if over_budget():
+                break
+            if start not in adj:
+                continue
+            if not _hop_ok(start, 0, hop_filters):
+                continue
+            dfs_cycle(start, start, [start], [], {start}, depth)
 
     results = [r for r in results if not r.is_partial]
     results.sort(key=_sort_key_cost)
