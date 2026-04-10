@@ -77,19 +77,18 @@ export default function HopFilter({ index, isEndpoint, value, onChange }: Props)
           onMouseLeave={scheduleClose}
         >
           {!isEndpoint && (
-            <div className="flex gap-1 items-center">
-              <SpinSelector
-                label="min"
+            <div className="flex gap-1.5 items-center">
+              <DayInput
+                placeholder="min"
                 value={value.minDays}
-                onChange={(v) => onChange({ ...value, minDays: v })}
+                onConfirm={(v) => onChange({ ...value, minDays: v })}
               />
-              <span className="text-[8px] text-[#484f58]">–</span>
-              <SpinSelector
-                label="max"
+              <DayInput
+                placeholder="max"
                 value={value.maxDays}
-                onChange={(v) => onChange({ ...value, maxDays: v })}
+                onConfirm={(v) => onChange({ ...value, maxDays: v })}
               />
-              <span className="text-[8px] text-[#484f58] ml-0.5">days</span>
+              <span className="text-[8px] text-[#484f58]">days</span>
             </div>
           )}
           <TagInput
@@ -112,50 +111,44 @@ export default function HopFilter({ index, isEndpoint, value, onChange }: Props)
   );
 }
 
-const SPIN_VALUES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 21, 30];
-
-function SpinSelector({ label, value, onChange }: {
-  label: string; value: number | null; onChange: (v: number | null) => void;
+function DayInput({ placeholder, value, onConfirm }: {
+  placeholder: string; value: number | null; onConfirm: (v: number | null) => void;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const allValues = [null, ...SPIN_VALUES];
-  const currentIdx = value == null ? 0 : allValues.indexOf(value);
+  const [draft, setDraft] = useState(value != null ? String(value) : "");
+  const dirty = (draft === "" ? null : Number(draft)) !== value;
 
-  function scrollTo(idx: number) {
-    const clamped = Math.max(0, Math.min(idx, allValues.length - 1));
-    onChange(allValues[clamped]);
+  useEffect(() => {
+    setDraft(value != null ? String(value) : "");
+  }, [value]);
+
+  function confirm() {
+    const v = draft.trim() === "" ? null : Math.max(0, Math.min(30, Number(draft)));
+    onConfirm(v);
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="relative flex flex-col items-center w-10 select-none"
-    >
+    <div className={`flex items-center gap-0 rounded border overflow-hidden ${
+      value != null ? "border-[#58a6ff]/30 bg-[#58a6ff]/10" : "border-[#21262d] bg-[#0d1117]"
+    }`}>
+      <input
+        type="number"
+        min={0}
+        max={30}
+        placeholder={placeholder}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") confirm(); }}
+        className="w-8 bg-transparent text-[10px] text-[#c9d1d9] text-center outline-none placeholder-[#484f58] py-[2px] pl-1 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+      />
       <button
-        onClick={() => scrollTo(currentIdx - 1)}
-        className="text-[#484f58] hover:text-[#8b949e] h-3 flex items-center justify-center"
-        disabled={currentIdx <= 0}
+        onClick={confirm}
+        className={`px-1 py-[2px] transition-colors ${
+          dirty ? "text-[#3fb950] hover:text-[#56d364]" : "text-[#30363d]"
+        }`}
+        title="Apply"
       >
-        <svg width="8" height="5" viewBox="0 0 8 5">
-          <path d="M1 4 L4 1 L7 4" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-        </svg>
-      </button>
-
-      <div className={`w-full text-center py-px rounded text-[10px] font-semibold tabular-nums ${
-        value != null
-          ? "bg-[#58a6ff]/15 text-[#58a6ff]"
-          : "text-[#484f58]"
-      }`}>
-        {value != null ? value : label}
-      </div>
-
-      <button
-        onClick={() => scrollTo(currentIdx + 1)}
-        className="text-[#484f58] hover:text-[#8b949e] h-3 flex items-center justify-center"
-        disabled={currentIdx >= allValues.length - 1}
-      >
-        <svg width="8" height="5" viewBox="0 0 8 5">
-          <path d="M1 1 L4 4 L7 1" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+        <svg width="8" height="8" viewBox="0 0 8 8">
+          <path d="M1 4 L3 6.5 L7 1.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
     </div>
