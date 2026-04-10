@@ -466,9 +466,10 @@ function PathCard({
                 {cityName(iata)}
               </span>
               {i < result.path.length - 1 && (
-                <span className="text-[11px] font-bold px-0.5" style={{ color }}>
-                  {"——→"}
-                </span>
+                <svg width="20" height="8" viewBox="0 0 20 8" className="shrink-0 mx-0.5" style={{ color }}>
+                  <line x1="0" y1="4" x2="14" y2="4" stroke="currentColor" strokeWidth="1.2" />
+                  <path d="M12 1 L17 4 L12 7" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               )}
             </span>
           );

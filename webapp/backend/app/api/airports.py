@@ -11,15 +11,36 @@ from app.schemas.airport import AirportOut, AirportSearchResult, CountryOut
 
 router = APIRouter(prefix="/airports", tags=["airports"])
 
+_COUNTRY_NAMES: dict[str, str] = {
+    "al": "Albania", "am": "Armenia", "at": "Austria", "az": "Azerbaijan",
+    "ba": "Bosnia and Herzegovina", "be": "Belgium", "bg": "Bulgaria",
+    "ch": "Switzerland", "cy": "Cyprus", "cz": "Czech Republic",
+    "de": "Germany", "dk": "Denmark", "ee": "Estonia", "eg": "Egypt",
+    "es": "Spain", "fi": "Finland", "fr": "France", "gb": "United Kingdom",
+    "ge": "Georgia", "gr": "Greece", "hr": "Croatia", "hu": "Hungary",
+    "ie": "Ireland", "il": "Israel", "is": "Iceland", "it": "Italy",
+    "jo": "Jordan", "lt": "Lithuania", "lu": "Luxembourg", "lv": "Latvia",
+    "ma": "Morocco", "md": "Moldova", "me": "Montenegro",
+    "mk": "North Macedonia", "mt": "Malta", "nl": "Netherlands",
+    "no": "Norway", "pl": "Poland", "pt": "Portugal", "ro": "Romania",
+    "rs": "Serbia", "se": "Sweden", "si": "Slovenia", "sk": "Slovakia",
+    "tr": "Türkiye", "ua": "Ukraine", "ae": "United Arab Emirates",
+}
+
 
 def _airport_to_out(ap: Airport) -> AirportOut:
-    country_name = ap.country.name if ap.country else None
+    cc = (ap.country_code or "").lower()
+    country_name = None
+    if ap.country and ap.country.name and len(ap.country.name) > 2:
+        country_name = ap.country.name
+    if not country_name:
+        country_name = _COUNTRY_NAMES.get(cc)
     return AirportOut(
         iata=ap.iata_code,
         name=ap.name,
         city=ap.city,
-        country_code=ap.country_code,
-        country=country_name or ap.country_code or "",
+        country_code=cc,
+        country=country_name or cc.upper(),
         lat=ap.latitude,
         lon=ap.longitude,
     )
