@@ -38,8 +38,12 @@ def _fare_to_out(
     dep_time = None
     arr_time = None
     if schedule_times and f.flight_number and f.departure_date:
-        key = (f.flight_number, str(f.departure_date))
-        times = schedule_times.get(key)
+        fn = f.flight_number
+        date_str = str(f.departure_date)
+        times = schedule_times.get((fn, date_str))
+        if not times:
+            stripped = fn.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+            times = schedule_times.get((stripped, date_str))
         if times:
             dep_time, arr_time = times
     return FareOut(

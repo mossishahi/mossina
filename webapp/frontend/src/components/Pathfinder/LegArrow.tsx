@@ -35,11 +35,11 @@ export default function LegArrow({ value, onChange, airlines }: Props) {
     <div className="relative flex items-center" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="text-sm font-bold transition-colors hover:opacity-80 px-0.5"
+        className="text-[13px] font-bold transition-colors hover:opacity-80 px-1"
         style={{ color }}
         title={value.airline ? AIRLINE_META[value.airline]?.name || value.airline : "Any airline"}
       >
-        →
+        ⟶
       </button>
 
       {open && (

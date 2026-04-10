@@ -4,6 +4,14 @@ import { useAirports } from "@/hooks/useAirports";
 import { useMapStore } from "@/stores/mapStore";
 import clsx from "clsx";
 
+function countryFlag(code: string): string {
+  const cc = code.toUpperCase();
+  if (cc.length !== 2) return "";
+  return String.fromCodePoint(
+    ...cc.split("").map((c) => 0x1f1e6 + c.charCodeAt(0) - 65),
+  );
+}
+
 export default function CountryTree() {
   const { data: airports = [] } = useAirports();
   const selectedCities = useMapStore((s) => s.selectedCities);
@@ -75,7 +83,7 @@ export default function CountryTree() {
     <div>
       <div className="flex items-center gap-2 mb-2">
         <span className="text-xs font-medium text-[#8b949e] uppercase tracking-wider shrink-0">
-          Countries
+          Countries / Cities
         </span>
         <div className="relative flex-1">
           <Search size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-[#484f58]" />
@@ -131,7 +139,10 @@ export default function CountryTree() {
                   className="accent-[#58a6ff] w-2.5 h-2.5"
                 />
                 <span className="text-[11px] text-[#c9d1d9] flex-1 truncate">
-                  {data.name}
+                  {countryFlag(country)} {data.name}
+                </span>
+                <span className="text-[9px] text-[#484f58] font-mono">
+                  {country.toUpperCase()}
                 </span>
                 <span className="text-[10px] text-[#484f58]">
                   {data.airports.length}

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { MapPin } from "lucide-react";
 import { useAirports } from "@/hooks/useAirports";
 
@@ -121,15 +121,25 @@ function TagInput({
   const [focused, setFocused] = useState(false);
   const { data: airports = [] } = useAirports();
 
-  const hits = focused && q.trim()
-    ? airports
-        .filter((a) => {
-          const lq = q.trim().toLowerCase();
-          return !tags.includes(a.iata) &&
-            (a.iata.toLowerCase().includes(lq) || (a.city || "").toLowerCase().includes(lq));
-        })
-        .slice(0, 5)
-    : [];
+  const hits = useMemo(() => {
+    if (!focused || !q.trim()) return [] as typeof airports;
+    const lq = q.trim().toLowerCase();
+    const countryMatch = new Set<string>();
+    airports.forEach((a) => {
+      if ((a.country || "").toLowerCase().includes(lq) ||
+          (a.country_code || "").toLowerCase() === lq)
+        countryMatch.add(a.country_code);
+    });
+    if (countryMatch.size > 0) {
+      return airports.filter(
+        (a) => countryMatch.has(a.country_code) && !tags.includes(a.iata),
+      );
+    }
+    return airports
+      .filter((a) => !tags.includes(a.iata) &&
+        (a.iata.toLowerCase().includes(lq) || (a.city || "").toLowerCase().includes(lq) || (a.name || "").toLowerCase().includes(lq)))
+      .slice(0, 6);
+  }, [focused, q, airports, tags]);
 
   return (
     <div className="relative">
@@ -151,8 +161,21 @@ function TagInput({
         />
       </div>
       {hits.length > 0 && (
-        <div className="absolute bottom-full left-0 right-0 mb-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-[110] max-h-24 overflow-y-auto">
-          {hits.map((a) => (
+        <div className="absolute bottom-full left-0 right-0 mb-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-[110] max-h-32 overflow-y-auto">
+          {hits.length > 3 && (
+            <button
+              onMouseDown={(e) => {
+                e.preventDefault();
+                hits.forEach((a) => onAdd(a.iata));
+                setQ("");
+              }}
+              className="w-full text-left px-2 py-0.5 text-[9px] hover:bg-[#21262d] font-semibold border-b border-[#30363d]"
+              style={{ color }}
+            >
+              + Add all {hits.length} cities
+            </button>
+          )}
+          {hits.slice(0, 8).map((a) => (
             <button
               key={a.iata}
               onMouseDown={(e) => { e.preventDefault(); onAdd(a.iata); setQ(""); }}

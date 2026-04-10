@@ -6,7 +6,7 @@ from sqlalchemy import func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Route
+from app.models import Fare, Route
 
 router = APIRouter(prefix="/airlines", tags=["airlines"])
 
@@ -22,6 +22,7 @@ class AirlineOut(BaseModel):
     code: str
     name: str
     color: str
+    last_scraped: str | None = None
 
 
 class AirlineStatsOut(BaseModel):
@@ -33,11 +34,17 @@ class AirlineStatsOut(BaseModel):
 
 
 @router.get("", response_model=list[AirlineOut])
-async def list_airlines():
-    return [
-        AirlineOut(code=code, name=meta["name"], color=meta["color"])
-        for code, meta in sorted(AIRLINE_META.items())
-    ]
+async def list_airlines(db: AsyncSession = Depends(get_db)):
+    out = []
+    for code, meta in sorted(AIRLINE_META.items()):
+        last = await db.scalar(
+            select(func.max(Fare.scraped_at)).where(Fare.airline == code)
+        )
+        out.append(AirlineOut(
+            code=code, name=meta["name"], color=meta["color"],
+            last_scraped=last.isoformat() if last else None,
+        ))
+    return out
 
 
 @router.get("/{code}/stats", response_model=AirlineStatsOut)

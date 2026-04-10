@@ -66,6 +66,7 @@ export interface AirlineInfo {
   code: string;
   name: string;
   color: string;
+  last_scraped: string | null;
 }
 
 export interface HopConstraint {
