@@ -38,6 +38,7 @@ export default function Pathfinder() {
 
   const clearPaths = usePathStore((s) => s.clearPaths);
   const setSearchActive = usePathStore((s) => s.setSearchActive);
+  const updateSelectedResults = usePathStore((s) => s.updateSelectedResults);
 
   const pathMutation = useSearchPaths();
   const cycleMutation = useSearchCycles();
@@ -183,7 +184,14 @@ export default function Pathfinder() {
             : { origins: s.cities, destinations: s.cities, max_hops: maxHops, date_from: s.from, date_to: s.to, only_selected: false, airline: s.airline };
           mutation.mutate(
             { ...base, hop_filters: hopConstraints } as any,
-            { onSettled: () => setRepricing(false) },
+            {
+              onSuccess: (data) => {
+                if (data?.results) {
+                  updateSelectedResults(data.results, isCycle ? "cycles" : "paths");
+                }
+              },
+              onSettled: () => setRepricing(false),
+            },
           );
         }, 600);
       }

@@ -19,6 +19,7 @@ interface PathStore {
   searchActive: boolean;
   setSearchActive: (v: boolean) => void;
   togglePath: (path: PathResult, tab: TabId) => void;
+  updateSelectedResults: (newResults: PathResult[], tab: TabId) => void;
   clearPaths: (tab?: TabId) => void;
   selectSegmentDate: (pathKey: string, segIdx: number, sel: SegmentSelection | null) => void;
   autoSelectBestDates: (pathKey: string, path: PathResult) => void;
@@ -26,7 +27,7 @@ interface PathStore {
 }
 
 function pathKey(p: PathResult): string {
-  const legs = p.legs.map((l) => `${l.origin}-${l.destination}:${l.airline}:${l.best_date || ""}`).join("|");
+  const legs = p.legs.map((l) => `${l.origin}-${l.destination}:${l.airline}`).join("|");
   return `${p.path.join(">")}::${legs}`;
 }
 
@@ -36,6 +37,20 @@ export const usePathStore = create<PathStore>((set) => ({
   minHoursPerStop: {},
   searchActive: false,
   setSearchActive: (v) => set({ searchActive: v }),
+
+  updateSelectedResults: (newResults, tab) =>
+    set((state) => {
+      const resultMap = new Map<string, PathResult>();
+      newResults.forEach((r) => resultMap.set(pathKey(r), r));
+      return {
+        selectedPaths: state.selectedPaths.map((tp) => {
+          if (tp.tab !== tab) return tp;
+          const k = pathKey(tp.result);
+          const updated = resultMap.get(k);
+          return updated ? { ...tp, result: updated } : tp;
+        }),
+      };
+    }),
 
   togglePath: (path, tab) =>
     set((state) => {

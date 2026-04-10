@@ -75,12 +75,12 @@ export default function HopFilter({ index, value, onChange }: Props) {
           onMouseEnter={keep}
           onMouseLeave={scheduleClose}
         >
-          <DayTagInput
-            minDays={value.minDays}
-            maxDays={value.maxDays}
-            onChangeMin={(v) => onChange({ ...value, minDays: v })}
-            onChangeMax={(v) => onChange({ ...value, maxDays: v })}
-          />
+          <div className="flex gap-1.5 items-center">
+            <DayDropdown label="min" value={value.minDays} onChange={(v) => onChange({ ...value, minDays: v })} />
+            <span className="text-[8px] text-[#484f58]">–</span>
+            <DayDropdown label="max" value={value.maxDays} onChange={(v) => onChange({ ...value, maxDays: v })} />
+            <span className="text-[8px] text-[#484f58]">days</span>
+          </div>
           <TagInput
             placeholder="include"
             tags={value.includeCities}
@@ -101,58 +101,55 @@ export default function HopFilter({ index, value, onChange }: Props) {
   );
 }
 
-function DayTagInput({
-  minDays, maxDays, onChangeMin, onChangeMax,
-}: {
-  minDays: number | null; maxDays: number | null;
-  onChangeMin: (v: number | null) => void;
-  onChangeMax: (v: number | null) => void;
-}) {
-  const [editing, setEditing] = useState<"min" | "max" | null>(null);
-  const [draft, setDraft] = useState("");
+const DAY_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 21, 30];
 
-  function commit(field: "min" | "max") {
-    const v = draft.trim() === "" ? null : Number(draft);
-    if (field === "min") onChangeMin(v);
-    else onChangeMax(v);
-    setEditing(null);
-    setDraft("");
-  }
+function DayDropdown({ label, value, onChange }: {
+  label: string; value: number | null; onChange: (v: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function click(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", click);
+    return () => document.removeEventListener("mousedown", click);
+  }, []);
 
   return (
-    <div className="flex items-center gap-1 bg-[#0d1117] border border-[#21262d] rounded px-1 py-[2px] overflow-x-auto no-scrollbar">
-      {minDays != null && editing !== "min" && (
-        <span className="shrink-0 inline-flex items-center gap-px px-1 rounded text-[8px] font-semibold bg-[#58a6ff]/15 text-[#58a6ff]">
-          min:{minDays}d
-          <button onClick={() => onChangeMin(null)} className="ml-0.5 text-[7px] opacity-70 hover:opacity-100">×</button>
-        </span>
-      )}
-      {maxDays != null && editing !== "max" && (
-        <span className="shrink-0 inline-flex items-center gap-px px-1 rounded text-[8px] font-semibold bg-[#58a6ff]/15 text-[#58a6ff]">
-          max:{maxDays}d
-          <button onClick={() => onChangeMax(null)} className="ml-0.5 text-[7px] opacity-70 hover:opacity-100">×</button>
-        </span>
-      )}
-      {editing ? (
-        <input
-          type="number" min={0} max={30} autoFocus
-          placeholder={editing === "min" ? "min days" : "max days"}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") commit(editing); if (e.key === "Escape") { setEditing(null); setDraft(""); } }}
-          onBlur={() => commit(editing)}
-          className="flex-1 min-w-[40px] bg-transparent text-[9px] text-[#c9d1d9] outline-none placeholder-[#484f58] py-px [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
-        />
-      ) : (
-        <input
-          type="text" readOnly
-          placeholder={minDays == null && maxDays == null ? "stay days" : ""}
-          onFocus={() => {
-            setEditing(minDays == null ? "min" : maxDays == null ? "max" : "min");
-            setDraft("");
-          }}
-          className="flex-1 min-w-[30px] bg-transparent text-[9px] text-[#c9d1d9] outline-none placeholder-[#484f58] py-px cursor-text"
-        />
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-0.5 px-1.5 py-[2px] rounded border text-[9px] transition-colors ${
+          value != null
+            ? "bg-[#58a6ff]/15 border-[#58a6ff]/30 text-[#58a6ff] font-semibold"
+            : "bg-[#0d1117] border-[#21262d] text-[#484f58] hover:text-[#8b949e]"
+        }`}
+      >
+        <span>{value != null ? value : label}</span>
+        <svg width="6" height="4" viewBox="0 0 6 4" className="shrink-0 opacity-50">
+          <path d="M0 0 L3 3.5 L6 0" fill="none" stroke="currentColor" strokeWidth="1" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 mb-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-[110] max-h-28 overflow-y-auto w-12">
+          <button
+            onMouseDown={(e) => { e.preventDefault(); onChange(null); setOpen(false); }}
+            className={`w-full text-center py-0.5 text-[9px] hover:bg-[#21262d] ${value == null ? "text-[#58a6ff] font-semibold" : "text-[#484f58]"}`}
+          >
+            –
+          </button>
+          {DAY_OPTIONS.map((n) => (
+            <button
+              key={n}
+              onMouseDown={(e) => { e.preventDefault(); onChange(n); setOpen(false); }}
+              className={`w-full text-center py-0.5 text-[9px] hover:bg-[#21262d] ${value === n ? "text-[#58a6ff] font-semibold" : "text-[#c9d1d9]"}`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
