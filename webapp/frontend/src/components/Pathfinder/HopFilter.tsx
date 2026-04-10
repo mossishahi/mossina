@@ -27,11 +27,12 @@ export function isHopActive(v: HopFilterValue): boolean {
 
 interface Props {
   index: number;
+  isEndpoint?: boolean;
   value: HopFilterValue;
   onChange: (val: HopFilterValue) => void;
 }
 
-export default function HopFilter({ index, value, onChange }: Props) {
+export default function HopFilter({ index, isEndpoint, value, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -75,12 +76,22 @@ export default function HopFilter({ index, value, onChange }: Props) {
           onMouseEnter={keep}
           onMouseLeave={scheduleClose}
         >
-          <div className="flex gap-1.5 items-center">
-            <DayDropdown label="min" value={value.minDays} onChange={(v) => onChange({ ...value, minDays: v })} />
-            <span className="text-[8px] text-[#484f58]">–</span>
-            <DayDropdown label="max" value={value.maxDays} onChange={(v) => onChange({ ...value, maxDays: v })} />
-            <span className="text-[8px] text-[#484f58]">days</span>
-          </div>
+          {!isEndpoint && (
+            <div className="flex gap-1 items-center">
+              <SpinSelector
+                label="min"
+                value={value.minDays}
+                onChange={(v) => onChange({ ...value, minDays: v })}
+              />
+              <span className="text-[8px] text-[#484f58]">–</span>
+              <SpinSelector
+                label="max"
+                value={value.maxDays}
+                onChange={(v) => onChange({ ...value, maxDays: v })}
+              />
+              <span className="text-[8px] text-[#484f58] ml-0.5">days</span>
+            </div>
+          )}
           <TagInput
             placeholder="include"
             tags={value.includeCities}
@@ -101,56 +112,60 @@ export default function HopFilter({ index, value, onChange }: Props) {
   );
 }
 
-const DAY_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 21, 30];
+const SPIN_VALUES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 21, 30];
 
-function DayDropdown({ label, value, onChange }: {
+function SpinSelector({ label, value, onChange }: {
   label: string; value: number | null; onChange: (v: number | null) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const allValues = [null, ...SPIN_VALUES];
+  const currentIdx = value == null ? 0 : allValues.indexOf(value);
 
-  useEffect(() => {
-    function click(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", click);
-    return () => document.removeEventListener("mousedown", click);
-  }, []);
+  function scrollTo(idx: number) {
+    const clamped = Math.max(0, Math.min(idx, allValues.length - 1));
+    onChange(allValues[clamped]);
+  }
+
+  function handleWheel(e: React.WheelEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.deltaY > 0) scrollTo(currentIdx + 1);
+    else if (e.deltaY < 0) scrollTo(currentIdx - 1);
+  }
 
   return (
-    <div className="relative" ref={ref}>
+    <div
+      ref={containerRef}
+      onWheel={handleWheel}
+      className="relative flex flex-col items-center w-10 select-none"
+    >
       <button
-        onClick={() => setOpen(!open)}
-        className={`flex items-center gap-0.5 px-1.5 py-[2px] rounded border text-[9px] transition-colors ${
-          value != null
-            ? "bg-[#58a6ff]/15 border-[#58a6ff]/30 text-[#58a6ff] font-semibold"
-            : "bg-[#0d1117] border-[#21262d] text-[#484f58] hover:text-[#8b949e]"
-        }`}
+        onClick={() => scrollTo(currentIdx - 1)}
+        className="text-[#484f58] hover:text-[#8b949e] h-3 flex items-center justify-center"
+        disabled={currentIdx <= 0}
       >
-        <span>{value != null ? value : label}</span>
-        <svg width="6" height="4" viewBox="0 0 6 4" className="shrink-0 opacity-50">
-          <path d="M0 0 L3 3.5 L6 0" fill="none" stroke="currentColor" strokeWidth="1" />
+        <svg width="8" height="5" viewBox="0 0 8 5">
+          <path d="M1 4 L4 1 L7 4" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
         </svg>
       </button>
-      {open && (
-        <div className="absolute bottom-full left-0 mb-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-[110] max-h-28 overflow-y-auto w-12">
-          <button
-            onMouseDown={(e) => { e.preventDefault(); onChange(null); setOpen(false); }}
-            className={`w-full text-center py-0.5 text-[9px] hover:bg-[#21262d] ${value == null ? "text-[#58a6ff] font-semibold" : "text-[#484f58]"}`}
-          >
-            –
-          </button>
-          {DAY_OPTIONS.map((n) => (
-            <button
-              key={n}
-              onMouseDown={(e) => { e.preventDefault(); onChange(n); setOpen(false); }}
-              className={`w-full text-center py-0.5 text-[9px] hover:bg-[#21262d] ${value === n ? "text-[#58a6ff] font-semibold" : "text-[#c9d1d9]"}`}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
-      )}
+
+      <div className={`w-full text-center py-px rounded text-[10px] font-semibold tabular-nums ${
+        value != null
+          ? "bg-[#58a6ff]/15 text-[#58a6ff]"
+          : "text-[#484f58]"
+      }`}>
+        {value != null ? value : label}
+      </div>
+
+      <button
+        onClick={() => scrollTo(currentIdx + 1)}
+        className="text-[#484f58] hover:text-[#8b949e] h-3 flex items-center justify-center"
+        disabled={currentIdx >= allValues.length - 1}
+      >
+        <svg width="8" height="5" viewBox="0 0 8 5">
+          <path d="M1 1 L4 4 L7 1" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+        </svg>
+      </button>
     </div>
   );
 }

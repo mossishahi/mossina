@@ -326,10 +326,12 @@ export default function Pathfinder() {
                         <div className="flex gap-0.5 px-2 py-2 items-center justify-center">
                           {Array.from({ length: n + 1 }, (_, i) => {
                             const lf = getLegFiltersForLength(n);
+                            const isEndpoint = i === 0 || i === n;
                             return (
                               <span key={i} className="inline-flex items-center">
                                 <HopFilter
                                   index={i}
+                                  isEndpoint={isEndpoint}
                                   value={hf[i] || emptyHop()}
                                   onChange={(val) => updateHopFilter(n, i, val)}
                                 />
