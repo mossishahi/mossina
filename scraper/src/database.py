@@ -170,6 +170,27 @@ class PriceHistory(Base):
     )
 
 
+class RouteHistory(Base):
+    __tablename__ = "route_history"
+    __table_args__ = (
+        Index("ix_route_history_route", "origin", "destination", "airline"),
+        Index("ix_route_history_observed", "observed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    origin: Mapped[str] = mapped_column(String(3), nullable=False)
+    destination: Mapped[str] = mapped_column(String(3), nullable=False)
+    airline: Mapped[str] = mapped_column(String(2), nullable=False)
+    has_fares: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    fare_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    min_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    earliest_flight: Mapped[date | None] = mapped_column(Date, nullable=True)
+    latest_flight: Mapped[date | None] = mapped_column(Date, nullable=True)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+
+
 class ExchangeRate(Base):
     __tablename__ = "exchange_rates"
 

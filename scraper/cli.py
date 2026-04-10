@@ -41,6 +41,46 @@ def snapshot_fares(session, airline_code, log):
     return count
 
 
+def snapshot_routes(session, airline_code, log):
+    """Record the current fare status of every route for this airline.
+
+    For each route, logs whether it has bookable fares, how many, the
+    cheapest price, and the flight date range. Routes with no fares are
+    included (has_fares=false) so we can detect when they gain/lose flights.
+    """
+    result = session.execute(text("""
+        INSERT INTO route_history
+            (origin, destination, airline, has_fares, fare_count,
+             min_price, earliest_flight, latest_flight, observed_at)
+        SELECT
+            r.origin, r.destination, r.airline,
+            COALESCE(f.cnt > 0, false),
+            COALESCE(f.cnt, 0),
+            f.min_price,
+            f.earliest,
+            f.latest,
+            now()
+        FROM routes r
+        LEFT JOIN (
+            SELECT origin, destination, airline,
+                   COUNT(*) AS cnt,
+                   MIN(price) AS min_price,
+                   MIN(departure_date) AS earliest,
+                   MAX(departure_date) AS latest
+            FROM fares
+            WHERE price > 0 AND departure_date >= current_date
+            GROUP BY origin, destination, airline
+        ) f ON r.origin = f.origin
+           AND r.destination = f.destination
+           AND r.airline = f.airline
+        WHERE r.airline = :airline
+    """), {"airline": airline_code})
+    session.commit()
+    count = result.rowcount
+    log.info("[%s] Recorded status for %d routes in route_history.", airline_code, count)
+    return count
+
+
 def run_scrape(args, log):
     """Run a single scrape pass for the configured airlines."""
     session = SessionLocal()
@@ -70,6 +110,9 @@ def run_scrape(args, log):
                 days_fresh=args.refresh_days,
                 workers=args.workers,
             )
+
+            log.info("Recording %s route availability ...", code)
+            snapshot_routes(session, code, log)
 
     except Exception:
         log.exception("Scrape pass failed")
