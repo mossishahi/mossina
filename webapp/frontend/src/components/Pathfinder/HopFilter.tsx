@@ -126,17 +126,9 @@ function SpinSelector({ label, value, onChange }: {
     onChange(allValues[clamped]);
   }
 
-  function handleWheel(e: React.WheelEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.deltaY > 0) scrollTo(currentIdx + 1);
-    else if (e.deltaY < 0) scrollTo(currentIdx - 1);
-  }
-
   return (
     <div
       ref={containerRef}
-      onWheel={handleWheel}
       className="relative flex flex-col items-center w-10 select-none"
     >
       <button
