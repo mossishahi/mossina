@@ -103,13 +103,23 @@ def run_scrape(args, log):
             log.info("Scraping routes ...")
             airline["scrape_routes"](session, airports)
 
-            log.info("Scraping schedules ...")
-            airline["scrape_schedules"](
+            log.info("Scraping fares ...")
+            airport_codes = [a.iata if hasattr(a, "iata") else a for a in airports]
+            airline["scrape_fares"](
                 session,
+                airports=airport_codes,
                 limit=args.limit,
-                days_fresh=args.refresh_days,
                 workers=args.workers,
             )
+
+            if code != "W6":
+                log.info("Scraping schedules ...")
+                airline["scrape_schedules"](
+                    session,
+                    limit=args.limit,
+                    days_fresh=args.refresh_days,
+                    workers=args.workers,
+                )
 
             log.info("Recording %s route availability ...", code)
             snapshot_routes(session, code, log)
@@ -136,8 +146,8 @@ def main():
     )
     parser.add_argument(
         "--workers", "-w",
-        type=int, default=2,
-        help="Parallel workers for schedule scraping (default: 2)",
+        type=int, default=8,
+        help="Parallel workers for scraping (default: 8)",
     )
     parser.add_argument(
         "--limit",

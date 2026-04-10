@@ -20,7 +20,7 @@ log = logging.getLogger("scraper")
 
 AIRLINE = "FR"
 DEFAULT_FRESH_DAYS = 7
-DEFAULT_WORKERS = 6
+DEFAULT_WORKERS = 8
 _SENTINEL = None
 
 SERVICES_URL = "https://services-api.ryanair.com"

@@ -8,6 +8,7 @@ AIRLINES = {
         "module": ryanair,
         "scrape_airports": ryanair.scrape_airports,
         "scrape_routes": ryanair.scrape_routes,
+        "scrape_fares": ryanair.scrape_fares,
         "scrape_schedules": ryanair.scrape_schedules,
     },
     "W6": {
@@ -15,6 +16,7 @@ AIRLINES = {
         "module": wizzair,
         "scrape_airports": wizzair.scrape_airports,
         "scrape_routes": wizzair.scrape_routes,
+        "scrape_fares": wizzair.scrape_fares,
         "scrape_schedules": wizzair.scrape_schedules,
     },
 }
