@@ -13,9 +13,32 @@ import argparse
 import sys
 import time
 
+from sqlalchemy import text
+
 from src.config import setup_logging
 from src.database import SessionLocal
 from src.scrapers import get_airline, list_airlines
+
+
+def snapshot_fares(session, airline_code, log):
+    """Copy all current fares for *airline_code* into price_history.
+
+    Uses a server-side INSERT...SELECT so nothing is loaded into Python.
+    Called BEFORE the scraper overwrites fares, so no price is ever lost.
+    """
+    result = session.execute(text("""
+        INSERT INTO price_history
+            (origin, destination, airline, departure_date,
+             price, currency, flight_number, scraped_at)
+        SELECT origin, destination, airline, departure_date,
+               price, currency, flight_number, scraped_at
+        FROM fares
+        WHERE airline = :airline
+    """), {"airline": airline_code})
+    session.commit()
+    count = result.rowcount
+    log.info("[%s] Saved %d fares to price_history.", airline_code, count)
+    return count
 
 
 def run_scrape(args, log):
@@ -30,6 +53,9 @@ def run_scrape(args, log):
         for code in codes:
             airline = get_airline(code)
             log.info("=== %s (%s) ===", airline["name"], code)
+
+            log.info("Snapshotting current %s fares to history ...", code)
+            snapshot_fares(session, code, log)
 
             log.info("Scraping airports ...")
             airports = airline["scrape_airports"](session)

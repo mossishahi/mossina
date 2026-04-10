@@ -149,6 +149,27 @@ class Fare(Base):
     )
 
 
+class PriceHistory(Base):
+    __tablename__ = "price_history"
+    __table_args__ = (
+        Index("ix_price_history_route", "origin", "destination", "airline"),
+        Index("ix_price_history_date", "departure_date"),
+        Index("ix_price_history_scraped", "scraped_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    origin: Mapped[str] = mapped_column(String(3), nullable=False)
+    destination: Mapped[str] = mapped_column(String(3), nullable=False)
+    airline: Mapped[str] = mapped_column(String(2), nullable=False)
+    departure_date: Mapped[date] = mapped_column(Date, nullable=False)
+    price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    flight_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    scraped_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+
+
 class ExchangeRate(Base):
     __tablename__ = "exchange_rates"
 
