@@ -129,6 +129,6 @@ export const usePathStore = create<PathStore>((set) => ({
 }));
 
 export function pathKey_(p: PathResult): string {
-  const legs = p.legs.map((l) => `${l.origin}-${l.destination}:${l.airline}:${l.best_date || ""}`).join("|");
+  const legs = p.legs.map((l) => `${l.origin}-${l.destination}:${l.airline}`).join("|");
   return `${p.path.join(">")}::${legs}`;
 }
