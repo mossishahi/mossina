@@ -64,8 +64,18 @@ def _build_path_result(
     airports: list[str],
     edges: list[tuple[str, str, str]],
     leg_fares: dict[tuple[str, str], list[tuple[date, float]]],
+    hop_filters: list[HopConstraint] | None = None,
 ) -> PathResult:
-    total, partial, per_leg = _sequential_best_cost(edges, leg_fares)
+    stay_days_per_hop = None
+    if hop_filters:
+        stay_days_per_hop = []
+        for i in range(len(edges)):
+            hop_idx = i + 1
+            hf = hop_filters[hop_idx] if hop_idx < len(hop_filters) else None
+            min_d = hf.min_stay_days if hf and hf.min_stay_days is not None else 1
+            max_d = hf.max_stay_days if hf and hf.max_stay_days is not None else None
+            stay_days_per_hop.append((min_d, max_d))
+    total, partial, per_leg = _sequential_best_cost(edges, leg_fares, stay_days_per_hop=stay_days_per_hop)
     legs: list[PathLeg] = []
     for i, (o, d, airline) in enumerate(edges):
         cost, best_date = per_leg[i]
@@ -139,11 +149,12 @@ def _sequential_best_cost(
     edges: list[tuple[str, str, str]],
     leg_fares: dict[tuple[str, str], list[tuple[date, float]]],
     min_stay_hours: int = 24,
+    stay_days_per_hop: list[tuple[int, int | None]] | None = None,
 ) -> tuple[float | None, bool, list[tuple[float | None, str | None]]]:
-    """Find the cheapest sequential trip with min stay between legs.
+    """Find the cheapest sequential trip with min/max stay between legs.
 
-    Each subsequent leg must depart at least min_stay_hours after the
-    previous leg's departure date.
+    stay_days_per_hop: list of (min_days, max_days) per intermediate stop.
+    If None, falls back to min_stay_hours globally.
 
     Returns (total_eur, is_partial, [(cost_per_leg, best_date_per_leg), ...])
     """
@@ -219,16 +230,16 @@ def _sequential_best_cost(
         sm = suffix_mins[leg_idx]
         return sm[pos]
 
-    stay_days = max(0, (min_stay_hours + 23) // 24)
+    default_stay = max(0, (min_stay_hours + 23) // 24)
 
-    # DP: dp[i] maps date -> (min_cost_to_reach, chosen_dates_list)
-    # Build from last leg backward using suffix minimums,
-    # then forward pass to find best total.
+    def _stay_for_leg(leg_idx: int) -> tuple[int, int | None]:
+        """Return (min_days, max_days) for the gap after leg_idx."""
+        if stay_days_per_hop and leg_idx < len(stay_days_per_hop):
+            return stay_days_per_hop[leg_idx]
+        return (default_stay, None)
 
-    # Forward recursive search with memoization
-    # For each leg, try all dates >= earliest and combine with best suffix
     def solve(
-        leg_idx: int, min_date_val: date
+        leg_idx: int, min_date_val: date, max_date_val: date | None = None,
     ) -> tuple[float, list[tuple[date, float]]] | None:
         fares = leg_date_fares[leg_idx]
         dates_only = [f[0] for f in fares]
@@ -236,15 +247,30 @@ def _sequential_best_cost(
         if pos >= len(fares):
             return None
         if leg_idx == n - 1:
-            # Last leg: just pick cheapest from pos onward
             sm = suffix_mins[leg_idx]
+            if max_date_val is not None:
+                best_dt, best_eur = None, float("inf")
+                for j in range(pos, len(fares)):
+                    if fares[j][0] > max_date_val:
+                        break
+                    if fares[j][1] < best_eur:
+                        best_eur = fares[j][1]
+                        best_dt = fares[j][0]
+                if best_dt is None:
+                    return None
+                return (best_eur, [(best_dt, best_eur)])
             best_dt, best_eur = sm[pos]
             return (best_eur, [(best_dt, best_eur)])
         best_result: tuple[float, list[tuple[date, float]]] | None = None
-        for j in range(pos, len(fares)):
+        min_stay, max_stay = _stay_for_leg(leg_idx)
+        end = len(fares)
+        if max_date_val is not None:
+            end = bisect.bisect_right(dates_only, max_date_val)
+        for j in range(pos, end):
             dt_j, eur_j = fares[j]
-            next_earliest = dt_j + timedelta(days=stay_days)
-            sub = solve(leg_idx + 1, next_earliest)
+            next_earliest = dt_j + timedelta(days=min_stay)
+            next_latest = (dt_j + timedelta(days=max_stay)) if max_stay is not None else None
+            sub = solve(leg_idx + 1, next_earliest, next_latest)
             if sub is None:
                 continue
             total = eur_j + sub[0]
@@ -268,7 +294,8 @@ def _sequential_best_cost(
     fb_total = 0.0
     cur_d: date | None = None
     for i in range(n):
-        earliest = (cur_d + timedelta(days=stay_days)) if cur_d else None
+        min_s, _ = _stay_for_leg(i - 1) if i > 0 else (default_stay, None)
+        earliest = (cur_d + timedelta(days=min_s)) if cur_d else None
         r = find_cheapest_from(i, earliest) if earliest else (
             suffix_mins[i][0] if suffix_mins[i] else None
         )
@@ -370,7 +397,7 @@ async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResp
                     x in allowed_intermediate for x in path_nodes[1:-1]
                 )
                 if interiors_ok:
-                    results.append(_build_path_result(path_nodes, path_edges, leg_fares))
+                    results.append(_build_path_result(path_nodes, path_edges, leg_fares, hop_filters))
         if len(path_edges) >= request.max_hops:
             return
         leg_idx = len(path_edges)
@@ -478,7 +505,7 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
                     continue
                 seen_cycle_keys.add(key)
                 full_edges = path_edges + [(current, nxt, airline)]
-                results.append(_build_path_result(full_nodes, full_edges, leg_fares))
+                results.append(_build_path_result(full_nodes, full_edges, leg_fares, hop_filters))
                 continue
             if nxt in visited:
                 continue

@@ -300,7 +300,7 @@ function SegmentDrawer({
                         : "hover:bg-[#0d1117] border border-transparent"
                     } ${isFlashing ? "best-fare-flash" : ""}`}
                   >
-                    {isSelected && <Check size={10} className="text-[#58a6ff] shrink-0" />}
+                    <Check size={10} className={`shrink-0 ${isSelected ? "text-[#58a6ff]" : "text-transparent"}`} />
                     <span className="text-[#484f58] w-6">{day}</span>
                     <span className="text-[#c9d1d9] w-14">{dateLabel}</span>
                     {f.departure_time && (

@@ -75,22 +75,12 @@ export default function HopFilter({ index, value, onChange }: Props) {
           onMouseEnter={keep}
           onMouseLeave={scheduleClose}
         >
-          <div className="flex gap-1.5">
-            <input
-              type="number" min={0} max={30}
-              placeholder="min days"
-              value={value.minDays ?? ""}
-              onChange={(e) => onChange({ ...value, minDays: e.target.value === "" ? null : Number(e.target.value) })}
-              className="flex-1 w-0 bg-[#0d1117] border border-[#21262d] rounded px-1.5 py-[3px] text-[10px] text-[#c9d1d9] outline-none focus:border-[#58a6ff] placeholder-[#484f58] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
-            />
-            <input
-              type="number" min={0} max={30}
-              placeholder="max days"
-              value={value.maxDays ?? ""}
-              onChange={(e) => onChange({ ...value, maxDays: e.target.value === "" ? null : Number(e.target.value) })}
-              className="flex-1 w-0 bg-[#0d1117] border border-[#21262d] rounded px-1.5 py-[3px] text-[10px] text-[#c9d1d9] outline-none focus:border-[#58a6ff] placeholder-[#484f58] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
-            />
-          </div>
+          <DayTagInput
+            minDays={value.minDays}
+            maxDays={value.maxDays}
+            onChangeMin={(v) => onChange({ ...value, minDays: v })}
+            onChangeMax={(v) => onChange({ ...value, maxDays: v })}
+          />
           <TagInput
             placeholder="include"
             tags={value.includeCities}
@@ -110,6 +100,64 @@ export default function HopFilter({ index, value, onChange }: Props) {
     </div>
   );
 }
+
+function DayTagInput({
+  minDays, maxDays, onChangeMin, onChangeMax,
+}: {
+  minDays: number | null; maxDays: number | null;
+  onChangeMin: (v: number | null) => void;
+  onChangeMax: (v: number | null) => void;
+}) {
+  const [editing, setEditing] = useState<"min" | "max" | null>(null);
+  const [draft, setDraft] = useState("");
+
+  function commit(field: "min" | "max") {
+    const v = draft.trim() === "" ? null : Number(draft);
+    if (field === "min") onChangeMin(v);
+    else onChangeMax(v);
+    setEditing(null);
+    setDraft("");
+  }
+
+  return (
+    <div className="flex items-center gap-1 bg-[#0d1117] border border-[#21262d] rounded px-1 py-[2px] overflow-x-auto no-scrollbar">
+      {minDays != null && editing !== "min" && (
+        <span className="shrink-0 inline-flex items-center gap-px px-1 rounded text-[8px] font-semibold bg-[#58a6ff]/15 text-[#58a6ff]">
+          min:{minDays}d
+          <button onClick={() => onChangeMin(null)} className="ml-0.5 text-[7px] opacity-70 hover:opacity-100">×</button>
+        </span>
+      )}
+      {maxDays != null && editing !== "max" && (
+        <span className="shrink-0 inline-flex items-center gap-px px-1 rounded text-[8px] font-semibold bg-[#58a6ff]/15 text-[#58a6ff]">
+          max:{maxDays}d
+          <button onClick={() => onChangeMax(null)} className="ml-0.5 text-[7px] opacity-70 hover:opacity-100">×</button>
+        </span>
+      )}
+      {editing ? (
+        <input
+          type="number" min={0} max={30} autoFocus
+          placeholder={editing === "min" ? "min days" : "max days"}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") commit(editing); if (e.key === "Escape") { setEditing(null); setDraft(""); } }}
+          onBlur={() => commit(editing)}
+          className="flex-1 min-w-[40px] bg-transparent text-[9px] text-[#c9d1d9] outline-none placeholder-[#484f58] py-px [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+        />
+      ) : (
+        <input
+          type="text" readOnly
+          placeholder={minDays == null && maxDays == null ? "stay days" : ""}
+          onFocus={() => {
+            setEditing(minDays == null ? "min" : maxDays == null ? "max" : "min");
+            setDraft("");
+          }}
+          className="flex-1 min-w-[30px] bg-transparent text-[9px] text-[#c9d1d9] outline-none placeholder-[#484f58] py-px cursor-text"
+        />
+      )}
+    </div>
+  );
+}
+
 
 function TagInput({
   placeholder, tags, color, onAdd, onRemove,
