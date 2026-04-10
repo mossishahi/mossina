@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { MapPin } from "lucide-react";
 import { useAirports } from "@/hooks/useAirports";
 
@@ -32,102 +32,78 @@ interface Props {
 }
 
 export default function HopFilter({ index, value, onChange }: Props) {
-  const [hovering, setHovering] = useState(false);
-  const [pinned, setPinned] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>();
   const active = isHopActive(value);
-  const show = hovering || pinned;
 
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setPinned(false);
-        setHovering(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+  const keep = useCallback(() => clearTimeout(closeTimer.current), []);
+  const scheduleClose = useCallback(() => {
+    clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setOpen(false), 250);
   }, []);
 
-  function handleEnter() {
-    clearTimeout(timerRef.current);
-    setHovering(true);
-  }
-  function handleLeave() {
-    timerRef.current = setTimeout(() => {
-      if (!pinned) setHovering(false);
-    }, 200);
-  }
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+
+  useEffect(() => {
+    function click(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node))
+        setOpen(false);
+    }
+    document.addEventListener("mousedown", click);
+    return () => document.removeEventListener("mousedown", click);
+  }, []);
 
   return (
     <div
-      className="relative"
-      ref={ref}
-      onMouseEnter={handleEnter}
-      onMouseLeave={handleLeave}
+      ref={wrapRef}
+      className="relative inline-flex items-center"
+      onMouseEnter={() => { keep(); setOpen(true); }}
+      onMouseLeave={scheduleClose}
     >
       <MapPin
-        size={14}
+        size={13}
+        strokeWidth={2.2}
         className={`cursor-pointer transition-colors ${
           active ? "text-[#58a6ff]" : "text-[#484f58] hover:text-[#8b949e]"
         }`}
-        onClick={() => setPinned(!pinned)}
       />
 
-      {show && (
+      {open && (
         <div
-          className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 z-50 bg-[#161b22] border border-[#30363d] rounded-lg shadow-xl w-52 p-2 space-y-2"
-          onMouseEnter={handleEnter}
-          onMouseLeave={handleLeave}
+          className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-[100] bg-[#161b22]/95 backdrop-blur border border-[#30363d] rounded-lg shadow-2xl w-48 p-2 space-y-1.5"
+          onMouseEnter={keep}
+          onMouseLeave={scheduleClose}
         >
-          <div className="flex gap-2">
+          <div className="flex gap-1.5">
             <input
-              type="number"
-              min={0}
-              max={30}
+              type="number" min={0} max={30}
               placeholder="min days"
               value={value.minDays ?? ""}
-              onChange={(e) =>
-                onChange({ ...value, minDays: e.target.value === "" ? null : Number(e.target.value) })
-              }
-              className="flex-1 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[10px] text-[#c9d1d9] outline-none focus:border-[#58a6ff] placeholder-[#484f58] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+              onChange={(e) => onChange({ ...value, minDays: e.target.value === "" ? null : Number(e.target.value) })}
+              className="flex-1 w-0 bg-[#0d1117] border border-[#21262d] rounded px-1.5 py-[3px] text-[10px] text-[#c9d1d9] outline-none focus:border-[#58a6ff] placeholder-[#484f58] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
             />
             <input
-              type="number"
-              min={0}
-              max={30}
+              type="number" min={0} max={30}
               placeholder="max days"
               value={value.maxDays ?? ""}
-              onChange={(e) =>
-                onChange({ ...value, maxDays: e.target.value === "" ? null : Number(e.target.value) })
-              }
-              className="flex-1 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[10px] text-[#c9d1d9] outline-none focus:border-[#58a6ff] placeholder-[#484f58] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+              onChange={(e) => onChange({ ...value, maxDays: e.target.value === "" ? null : Number(e.target.value) })}
+              className="flex-1 w-0 bg-[#0d1117] border border-[#21262d] rounded px-1.5 py-[3px] text-[10px] text-[#c9d1d9] outline-none focus:border-[#58a6ff] placeholder-[#484f58] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
             />
           </div>
-
-          <CityTagInput
-            placeholder="include cities"
-            cities={value.includeCities}
+          <TagInput
+            placeholder="include"
+            tags={value.includeCities}
             color="#3fb950"
-            onAdd={(iata) =>
-              onChange({ ...value, includeCities: [...value.includeCities, iata] })
-            }
-            onRemove={(iata) =>
-              onChange({ ...value, includeCities: value.includeCities.filter((c) => c !== iata) })
-            }
+            onAdd={(c) => onChange({ ...value, includeCities: [...value.includeCities, c] })}
+            onRemove={(c) => onChange({ ...value, includeCities: value.includeCities.filter((x) => x !== c) })}
           />
-
-          <CityTagInput
-            placeholder="exclude cities"
-            cities={value.excludeCities}
+          <TagInput
+            placeholder="exclude"
+            tags={value.excludeCities}
             color="#e5534b"
-            onAdd={(iata) =>
-              onChange({ ...value, excludeCities: [...value.excludeCities, iata] })
-            }
-            onRemove={(iata) =>
-              onChange({ ...value, excludeCities: value.excludeCities.filter((c) => c !== iata) })
-            }
+            onAdd={(c) => onChange({ ...value, excludeCities: [...value.excludeCities, c] })}
+            onRemove={(c) => onChange({ ...value, excludeCities: value.excludeCities.filter((x) => x !== c) })}
           />
         </div>
       )}
@@ -135,81 +111,54 @@ export default function HopFilter({ index, value, onChange }: Props) {
   );
 }
 
-function CityTagInput({
-  placeholder,
-  cities,
-  color,
-  onAdd,
-  onRemove,
+function TagInput({
+  placeholder, tags, color, onAdd, onRemove,
 }: {
-  placeholder: string;
-  cities: string[];
-  color: string;
-  onAdd: (iata: string) => void;
-  onRemove: (iata: string) => void;
+  placeholder: string; tags: string[]; color: string;
+  onAdd: (iata: string) => void; onRemove: (iata: string) => void;
 }) {
-  const [query, setQuery] = useState("");
+  const [q, setQ] = useState("");
   const [focused, setFocused] = useState(false);
   const { data: airports = [] } = useAirports();
 
-  const suggestions =
-    focused && query.trim().length > 0
-      ? airports
-          .filter((a) => {
-            const lq = query.trim().toLowerCase();
-            return (
-              !cities.includes(a.iata) &&
-              (a.iata.toLowerCase().includes(lq) ||
-                (a.city || "").toLowerCase().includes(lq) ||
-                (a.name || "").toLowerCase().includes(lq))
-            );
-          })
-          .slice(0, 5)
-      : [];
+  const hits = focused && q.trim()
+    ? airports
+        .filter((a) => {
+          const lq = q.trim().toLowerCase();
+          return !tags.includes(a.iata) &&
+            (a.iata.toLowerCase().includes(lq) || (a.city || "").toLowerCase().includes(lq));
+        })
+        .slice(0, 5)
+    : [];
 
   return (
     <div className="relative">
-      <div className="flex items-center bg-[#0d1117] border border-[#30363d] rounded px-1.5 py-0.5 gap-1 overflow-x-auto no-scrollbar">
-        {cities.map((c) => (
-          <span
-            key={c}
-            className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium whitespace-nowrap shrink-0"
-            style={{ background: `${color}20`, color }}
-          >
-            {c}
-            <button
-              onClick={() => onRemove(c)}
-              className="hover:opacity-70 text-[8px] leading-none ml-0.5"
-            >
-              ×
-            </button>
+      <div className="flex items-center gap-0.5 bg-[#0d1117] border border-[#21262d] rounded px-1 py-[2px] overflow-x-auto no-scrollbar">
+        {tags.map((t) => (
+          <span key={t} className="shrink-0 inline-flex items-center gap-px px-1 rounded text-[8px] font-semibold" style={{ background: `${color}18`, color }}>
+            {t}
+            <button onClick={() => onRemove(t)} className="ml-0.5 text-[7px] opacity-70 hover:opacity-100">×</button>
           </span>
         ))}
         <input
           type="text"
-          placeholder={cities.length === 0 ? placeholder : ""}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          placeholder={tags.length === 0 ? placeholder : ""}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 150)}
-          className="flex-1 min-w-[40px] bg-transparent text-[10px] text-[#c9d1d9] outline-none placeholder-[#484f58] py-0.5"
+          className="flex-1 min-w-[30px] bg-transparent text-[9px] text-[#c9d1d9] outline-none placeholder-[#484f58] py-px"
         />
       </div>
-      {suggestions.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-50 max-h-24 overflow-y-auto">
-          {suggestions.map((a) => (
+      {hits.length > 0 && (
+        <div className="absolute bottom-full left-0 right-0 mb-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-[110] max-h-24 overflow-y-auto">
+          {hits.map((a) => (
             <button
               key={a.iata}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onAdd(a.iata);
-                setQuery("");
-              }}
-              className="w-full text-left px-2 py-1 text-[9px] hover:bg-[#21262d] flex items-center gap-1"
+              onMouseDown={(e) => { e.preventDefault(); onAdd(a.iata); setQ(""); }}
+              className="w-full text-left px-2 py-0.5 text-[9px] hover:bg-[#21262d] flex items-center gap-1"
             >
-              <span className="font-mono font-semibold" style={{ color }}>
-                {a.iata}
-              </span>
+              <span className="font-mono font-bold" style={{ color }}>{a.iata}</span>
               <span className="text-[#8b949e] truncate">{a.city || a.name}</span>
             </button>
           ))}

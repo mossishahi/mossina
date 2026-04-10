@@ -279,7 +279,7 @@ export default function Pathfinder() {
 
                     {isOpen && (
                       <div className="pb-1">
-                        <div className="flex gap-0 px-1 py-1.5 flex-wrap items-center">
+                        <div className="flex gap-0.5 px-2 py-2 items-center justify-center">
                           {Array.from({ length: n + 1 }, (_, i) => {
                             if (isCycle && i === n) return null;
                             const lf = getLegFiltersForLength(n);
