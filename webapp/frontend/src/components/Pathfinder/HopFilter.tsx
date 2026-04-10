@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { MapPin, X } from "lucide-react";
+import { MapPin } from "lucide-react";
 import { useAirports } from "@/hooks/useAirports";
 
 export interface HopFilterValue {
@@ -27,209 +27,153 @@ export function isHopActive(v: HopFilterValue): boolean {
 
 interface Props {
   index: number;
-  label?: string;
   value: HopFilterValue;
   onChange: (val: HopFilterValue) => void;
 }
 
-export default function HopFilter({ index, label, value, onChange }: Props) {
-  const [open, setOpen] = useState(false);
+export default function HopFilter({ index, value, onChange }: Props) {
+  const [hovering, setHovering] = useState(false);
+  const [pinned, setPinned] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const active = isHopActive(value);
+  const show = hovering || pinned;
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
+        setPinned(false);
+        setHovering(false);
       }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen(!open)}
-        className={`flex items-center gap-1 px-1.5 py-1 rounded-full border transition-all ${
-          active
-            ? "bg-[#58a6ff]/15 border-[#58a6ff]/40 text-[#58a6ff]"
-            : "bg-[#161b22] border-[#30363d] text-[#8b949e] hover:border-[#484f58]"
-        }`}
-        title={label || `Hop ${index}`}
-      >
-        <MapPin size={10} className="shrink-0" />
-        {label && <span className="text-[9px] font-medium">{label}</span>}
-        {!label && value.includeCities.length > 0 && (
-          <span className="text-[9px] font-medium">{value.includeCities.join(",")}</span>
-        )}
-        {!label && value.includeCities.length === 0 && (
-          <span className="text-[9px]">{index}</span>
-        )}
-      </button>
+  function handleEnter() {
+    clearTimeout(timerRef.current);
+    setHovering(true);
+  }
+  function handleLeave() {
+    timerRef.current = setTimeout(() => {
+      if (!pinned) setHovering(false);
+    }, 200);
+  }
 
-      {open && (
-        <HopPopover value={value} onChange={onChange} onClose={() => setOpen(false)} />
+  return (
+    <div
+      className="relative"
+      ref={ref}
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+    >
+      <MapPin
+        size={14}
+        className={`cursor-pointer transition-colors ${
+          active ? "text-[#58a6ff]" : "text-[#484f58] hover:text-[#8b949e]"
+        }`}
+        onClick={() => setPinned(!pinned)}
+      />
+
+      {show && (
+        <div
+          className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 z-50 bg-[#161b22] border border-[#30363d] rounded-lg shadow-xl w-52 p-2 space-y-2"
+          onMouseEnter={handleEnter}
+          onMouseLeave={handleLeave}
+        >
+          <div className="flex gap-2">
+            <input
+              type="number"
+              min={0}
+              max={30}
+              placeholder="min days"
+              value={value.minDays ?? ""}
+              onChange={(e) =>
+                onChange({ ...value, minDays: e.target.value === "" ? null : Number(e.target.value) })
+              }
+              className="flex-1 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[10px] text-[#c9d1d9] outline-none focus:border-[#58a6ff] placeholder-[#484f58] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+            />
+            <input
+              type="number"
+              min={0}
+              max={30}
+              placeholder="max days"
+              value={value.maxDays ?? ""}
+              onChange={(e) =>
+                onChange({ ...value, maxDays: e.target.value === "" ? null : Number(e.target.value) })
+              }
+              className="flex-1 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-[10px] text-[#c9d1d9] outline-none focus:border-[#58a6ff] placeholder-[#484f58] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+            />
+          </div>
+
+          <CityTagInput
+            placeholder="include cities"
+            cities={value.includeCities}
+            color="#3fb950"
+            onAdd={(iata) =>
+              onChange({ ...value, includeCities: [...value.includeCities, iata] })
+            }
+            onRemove={(iata) =>
+              onChange({ ...value, includeCities: value.includeCities.filter((c) => c !== iata) })
+            }
+          />
+
+          <CityTagInput
+            placeholder="exclude cities"
+            cities={value.excludeCities}
+            color="#e5534b"
+            onAdd={(iata) =>
+              onChange({ ...value, excludeCities: [...value.excludeCities, iata] })
+            }
+            onRemove={(iata) =>
+              onChange({ ...value, excludeCities: value.excludeCities.filter((c) => c !== iata) })
+            }
+          />
+        </div>
       )}
     </div>
   );
 }
 
-function HopPopover({
-  value,
-  onChange,
-  onClose,
-}: {
-  value: HopFilterValue;
-  onChange: (v: HopFilterValue) => void;
-  onClose: () => void;
-}) {
-  const [includeQuery, setIncludeQuery] = useState("");
-  const [excludeQuery, setExcludeQuery] = useState("");
-  const [activeField, setActiveField] = useState<"include" | "exclude" | null>(null);
-  const { data: airports = [] } = useAirports();
-
-  function search(q: string) {
-    if (q.trim().length === 0) return [];
-    const lq = q.trim().toLowerCase();
-    return airports
-      .filter(
-        (a) =>
-          a.iata.toLowerCase().includes(lq) ||
-          (a.city || "").toLowerCase().includes(lq) ||
-          (a.name || "").toLowerCase().includes(lq),
-      )
-      .slice(0, 6);
-  }
-
-  function addCity(list: "include" | "exclude", iata: string) {
-    if (list === "include") {
-      if (!value.includeCities.includes(iata)) {
-        onChange({ ...value, includeCities: [...value.includeCities, iata] });
-      }
-      setIncludeQuery("");
-    } else {
-      if (!value.excludeCities.includes(iata)) {
-        onChange({ ...value, excludeCities: [...value.excludeCities, iata] });
-      }
-      setExcludeQuery("");
-    }
-  }
-
-  function removeCity(list: "include" | "exclude", iata: string) {
-    if (list === "include") {
-      onChange({ ...value, includeCities: value.includeCities.filter((c) => c !== iata) });
-    } else {
-      onChange({ ...value, excludeCities: value.excludeCities.filter((c) => c !== iata) });
-    }
-  }
-
-  return (
-    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50 bg-[#161b22] border border-[#30363d] rounded-lg shadow-xl w-56 p-3 space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold text-[#c9d1d9]">Stop filter</span>
-        <button onClick={onClose} className="text-[#484f58] hover:text-[#c9d1d9]">
-          <X size={12} />
-        </button>
-      </div>
-
-      <div className="flex gap-2">
-        <div className="flex-1">
-          <label className="text-[9px] text-[#8b949e] uppercase tracking-wide">Min stay</label>
-          <div className="flex items-center gap-1 mt-0.5">
-            <input
-              type="number"
-              min={0}
-              max={30}
-              placeholder="-"
-              value={value.minDays ?? ""}
-              onChange={(e) =>
-                onChange({ ...value, minDays: e.target.value === "" ? null : Number(e.target.value) })
-              }
-              className="w-full bg-[#0d1117] border border-[#30363d] rounded px-1.5 py-1 text-[10px] text-[#c9d1d9] text-center outline-none focus:border-[#58a6ff] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
-            />
-            <span className="text-[9px] text-[#484f58]">days</span>
-          </div>
-        </div>
-        <div className="flex-1">
-          <label className="text-[9px] text-[#8b949e] uppercase tracking-wide">Max stay</label>
-          <div className="flex items-center gap-1 mt-0.5">
-            <input
-              type="number"
-              min={0}
-              max={30}
-              placeholder="-"
-              value={value.maxDays ?? ""}
-              onChange={(e) =>
-                onChange({ ...value, maxDays: e.target.value === "" ? null : Number(e.target.value) })
-              }
-              className="w-full bg-[#0d1117] border border-[#30363d] rounded px-1.5 py-1 text-[10px] text-[#c9d1d9] text-center outline-none focus:border-[#58a6ff] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
-            />
-            <span className="text-[9px] text-[#484f58]">days</span>
-          </div>
-        </div>
-      </div>
-
-      <CityTagField
-        label="Include cities"
-        cities={value.includeCities}
-        query={includeQuery}
-        setQuery={setIncludeQuery}
-        active={activeField === "include"}
-        onFocus={() => setActiveField("include")}
-        suggestions={activeField === "include" ? search(includeQuery) : []}
-        onAdd={(iata) => addCity("include", iata)}
-        onRemove={(iata) => removeCity("include", iata)}
-        color="#3fb950"
-      />
-
-      <CityTagField
-        label="Exclude cities"
-        cities={value.excludeCities}
-        query={excludeQuery}
-        setQuery={setExcludeQuery}
-        active={activeField === "exclude"}
-        onFocus={() => setActiveField("exclude")}
-        suggestions={activeField === "exclude" ? search(excludeQuery) : []}
-        onAdd={(iata) => addCity("exclude", iata)}
-        onRemove={(iata) => removeCity("exclude", iata)}
-        color="#e5534b"
-      />
-    </div>
-  );
-}
-
-function CityTagField({
-  label,
+function CityTagInput({
+  placeholder,
   cities,
-  query,
-  setQuery,
-  active,
-  onFocus,
-  suggestions,
+  color,
   onAdd,
   onRemove,
-  color,
 }: {
-  label: string;
+  placeholder: string;
   cities: string[];
-  query: string;
-  setQuery: (v: string) => void;
-  active: boolean;
-  onFocus: () => void;
-  suggestions: { iata: string; city: string; name: string }[];
+  color: string;
   onAdd: (iata: string) => void;
   onRemove: (iata: string) => void;
-  color: string;
 }) {
+  const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
+  const { data: airports = [] } = useAirports();
+
+  const suggestions =
+    focused && query.trim().length > 0
+      ? airports
+          .filter((a) => {
+            const lq = query.trim().toLowerCase();
+            return (
+              !cities.includes(a.iata) &&
+              (a.iata.toLowerCase().includes(lq) ||
+                (a.city || "").toLowerCase().includes(lq) ||
+                (a.name || "").toLowerCase().includes(lq))
+            );
+          })
+          .slice(0, 5)
+      : [];
+
   return (
     <div className="relative">
-      <label className="text-[9px] text-[#8b949e] uppercase tracking-wide">{label}</label>
-      <div className="flex flex-wrap gap-1 mt-0.5 bg-[#0d1117] border border-[#30363d] rounded p-1 min-h-[26px] items-center">
+      <div className="flex items-center bg-[#0d1117] border border-[#30363d] rounded px-1.5 py-0.5 gap-1 overflow-x-auto no-scrollbar">
         {cities.map((c) => (
           <span
             key={c}
-            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium"
+            className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium whitespace-nowrap shrink-0"
             style={{ background: `${color}20`, color }}
           >
             {c}
@@ -243,32 +187,32 @@ function CityTagField({
         ))}
         <input
           type="text"
-          placeholder={cities.length === 0 ? "Search..." : ""}
+          placeholder={cities.length === 0 ? placeholder : ""}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onFocus={onFocus}
-          className="flex-1 min-w-[40px] bg-transparent text-[10px] text-[#c9d1d9] outline-none placeholder-[#30363d]"
+          onFocus={() => setFocused(true)}
+          onBlur={() => setTimeout(() => setFocused(false), 150)}
+          className="flex-1 min-w-[40px] bg-transparent text-[10px] text-[#c9d1d9] outline-none placeholder-[#484f58] py-0.5"
         />
       </div>
-      {active && suggestions.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-50 max-h-28 overflow-y-auto">
-          {suggestions
-            .filter((a) => !cities.includes(a.iata))
-            .map((a) => (
-              <button
-                key={a.iata}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  onAdd(a.iata);
-                }}
-                className="w-full text-left px-2 py-1 text-[9px] hover:bg-[#21262d] flex items-center gap-1"
-              >
-                <span className="font-mono font-semibold" style={{ color }}>
-                  {a.iata}
-                </span>
-                <span className="text-[#8b949e] truncate">{a.city || a.name}</span>
-              </button>
-            ))}
+      {suggestions.length > 0 && (
+        <div className="absolute top-full left-0 right-0 mt-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-50 max-h-24 overflow-y-auto">
+          {suggestions.map((a) => (
+            <button
+              key={a.iata}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onAdd(a.iata);
+                setQuery("");
+              }}
+              className="w-full text-left px-2 py-1 text-[9px] hover:bg-[#21262d] flex items-center gap-1"
+            >
+              <span className="font-mono font-semibold" style={{ color }}>
+                {a.iata}
+              </span>
+              <span className="text-[#8b949e] truncate">{a.city || a.name}</span>
+            </button>
+          ))}
         </div>
       )}
     </div>

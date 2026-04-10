@@ -282,17 +282,15 @@ export default function Pathfinder() {
                         <div className="flex gap-0 px-1 py-1.5 flex-wrap items-center">
                           {Array.from({ length: n + 1 }, (_, i) => {
                             if (isCycle && i === n) return null;
-                            const label = i === 0 ? "Origin" : i === n ? "Dest" : undefined;
                             const lf = getLegFiltersForLength(n);
                             return (
                               <span key={i} className="inline-flex items-center">
                                 <HopFilter
                                   index={i}
-                                  label={label}
                                   value={hf[i] || emptyHop()}
                                   onChange={(val) => updateHopFilter(n, i, val)}
                                 />
-                                {i < n && !(isCycle && i === n - 1 && false) && (
+                                {(isCycle ? i < n - 1 : i < n) && (
                                   <LegArrow
                                     value={lf[i] || emptyLeg()}
                                     onChange={(val) => updateLegFilter(n, i, val)}
