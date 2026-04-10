@@ -224,7 +224,7 @@ function TagInput({
         />
       </div>
       {hasResults && (
-        <div className="absolute bottom-full left-0 right-0 mb-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-[110] max-h-40 overflow-y-auto">
+        <div className="absolute top-full left-0 right-0 mt-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-[110] max-h-40 overflow-y-auto">
           {countryEntries.map((entry) => (
             <button
               key={`country-${entry.code}`}
