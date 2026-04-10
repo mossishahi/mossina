@@ -42,14 +42,18 @@ export const usePathStore = create<PathStore>((set) => ({
     set((state) => {
       const resultMap = new Map<string, PathResult>();
       newResults.forEach((r) => resultMap.set(pathKey(r), r));
-      return {
-        selectedPaths: state.selectedPaths.map((tp) => {
-          if (tp.tab !== tab) return tp;
-          const k = pathKey(tp.result);
-          const updated = resultMap.get(k);
-          return updated ? { ...tp, result: updated } : tp;
-        }),
-      };
+      const nextSels = { ...state.segmentSelections };
+      const updatedPaths = state.selectedPaths.map((tp) => {
+        if (tp.tab !== tab) return tp;
+        const k = pathKey(tp.result);
+        const updated = resultMap.get(k);
+        if (updated) {
+          delete nextSels[k];
+          return { ...tp, result: updated };
+        }
+        return tp;
+      });
+      return { selectedPaths: updatedPaths, segmentSelections: nextSels };
     }),
 
   togglePath: (path, tab) =>
