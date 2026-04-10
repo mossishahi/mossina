@@ -3,7 +3,7 @@
 from collections import defaultdict
 from datetime import date
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.fare import Fare
@@ -28,22 +28,29 @@ async def fetch_filtered_route_edges(
     date_from: date | None,
     date_to: date | None,
 ) -> list[tuple[str, str, str]]:
-    """Return (origin, destination, airline) rows matching route and optional fare window."""
+    """Return (origin, destination, airline) rows that have bookable fares.
+
+    Only routes with at least one fare (price > 0, future departure) are
+    included.  When date_from/date_to are set, fares must also fall within
+    that window.
+    """
     stmt = select(Route.origin, Route.destination, Route.airline)
     if airline:
         stmt = stmt.where(Route.airline == airline)
+
+    fare_conditions = [
+        Fare.origin == Route.origin,
+        Fare.destination == Route.destination,
+        Fare.airline == Route.airline,
+        Fare.price > 0,
+        Fare.departure_date >= func.current_date(),
+    ]
     df, dt = _normalize_date_range(date_from, date_to)
     if df is not None and dt is not None:
-        fare_ok = exists(
-            select(1).where(
-                Fare.origin == Route.origin,
-                Fare.destination == Route.destination,
-                Fare.airline == Route.airline,
-                Fare.departure_date >= df,
-                Fare.departure_date <= dt,
-            )
-        )
-        stmt = stmt.where(fare_ok)
+        fare_conditions.append(Fare.departure_date >= df)
+        fare_conditions.append(Fare.departure_date <= dt)
+
+    stmt = stmt.where(exists(select(1).where(*fare_conditions)))
     result = await db.execute(stmt)
     return [(row[0], row[1], row[2]) for row in result.all()]
 

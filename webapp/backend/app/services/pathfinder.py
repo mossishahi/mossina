@@ -366,6 +366,7 @@ async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResp
             continue
         dfs_path(origin, [origin], [], {origin})
 
+    results = [r for r in results if not r.is_partial]
     results.sort(key=_sort_key_cost)
     elapsed_ms = (time.perf_counter() - t_start) * 1000
     return SearchResponse(
@@ -456,6 +457,7 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
             continue
         dfs_cycle(start, start, [start], [], {start})
 
+    results = [r for r in results if not r.is_partial]
     results.sort(key=_sort_key_cost)
     elapsed_ms = (time.perf_counter() - t_start) * 1000
     return SearchResponse(
