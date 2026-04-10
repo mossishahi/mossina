@@ -97,6 +97,7 @@ export default function HopFilter({ index, isEndpoint, value, onChange }: Props)
             color="#3fb950"
             onAdd={(c) => onChange({ ...value, includeCities: [...value.includeCities, c] })}
             onRemove={(c) => onChange({ ...value, includeCities: value.includeCities.filter((x) => x !== c) })}
+            onAddMany={(cs) => onChange({ ...value, includeCities: [...new Set([...value.includeCities, ...cs])] })}
           />
           <TagInput
             placeholder="exclude"
@@ -104,6 +105,7 @@ export default function HopFilter({ index, isEndpoint, value, onChange }: Props)
             color="#e5534b"
             onAdd={(c) => onChange({ ...value, excludeCities: [...value.excludeCities, c] })}
             onRemove={(c) => onChange({ ...value, excludeCities: value.excludeCities.filter((x) => x !== c) })}
+            onAddMany={(cs) => onChange({ ...value, excludeCities: [...new Set([...value.excludeCities, ...cs])] })}
           />
         </div>
       )}
@@ -157,34 +159,50 @@ function DayInput({ placeholder, value, onConfirm }: {
 
 
 function TagInput({
-  placeholder, tags, color, onAdd, onRemove,
+  placeholder, tags, color, onAdd, onRemove, onAddMany,
 }: {
   placeholder: string; tags: string[]; color: string;
   onAdd: (iata: string) => void; onRemove: (iata: string) => void;
+  onAddMany?: (iatas: string[]) => void;
 }) {
   const [q, setQ] = useState("");
   const [focused, setFocused] = useState(false);
   const { data: airports = [] } = useAirports();
 
-  const hits = useMemo(() => {
-    if (!focused || !q.trim()) return [] as typeof airports;
+  const { countryEntries, cityHits } = useMemo(() => {
+    if (!focused || !q.trim()) return { countryEntries: [] as { name: string; code: string; cities: typeof airports }[], cityHits: [] as typeof airports };
     const lq = q.trim().toLowerCase();
-    const countryMatch = new Set<string>();
+
+    const countryMap = new Map<string, { name: string; code: string; cities: typeof airports }>();
     airports.forEach((a) => {
       if ((a.country || "").toLowerCase().includes(lq) ||
-          (a.country_code || "").toLowerCase() === lq)
-        countryMatch.add(a.country_code);
+          (a.country_code || "").toLowerCase() === lq) {
+        const key = a.country_code;
+        if (!countryMap.has(key)) countryMap.set(key, { name: a.country || key, code: key, cities: [] });
+        if (!tags.includes(a.iata)) countryMap.get(key)!.cities.push(a);
+      }
     });
-    if (countryMatch.size > 0) {
-      return airports.filter(
-        (a) => countryMatch.has(a.country_code) && !tags.includes(a.iata),
-      );
+
+    if (countryMap.size > 0) {
+      const entries = [...countryMap.values()].filter((e) => e.cities.length > 0);
+      const topCities = entries.flatMap((e) => e.cities).slice(0, 6);
+      return { countryEntries: entries, cityHits: topCities };
     }
-    return airports
+
+    const cities = airports
       .filter((a) => !tags.includes(a.iata) &&
         (a.iata.toLowerCase().includes(lq) || (a.city || "").toLowerCase().includes(lq) || (a.name || "").toLowerCase().includes(lq)))
       .slice(0, 6);
+    return { countryEntries: [], cityHits: cities };
   }, [focused, q, airports, tags]);
+
+  const hasResults = countryEntries.length > 0 || cityHits.length > 0;
+
+  function addAll(iatas: string[]) {
+    if (onAddMany) onAddMany(iatas);
+    else iatas.forEach((c) => onAdd(c));
+    setQ("");
+  }
 
   return (
     <div className="relative">
@@ -205,22 +223,24 @@ function TagInput({
           className="flex-1 min-w-[30px] bg-transparent text-[9px] text-[#c9d1d9] outline-none placeholder-[#484f58] py-px"
         />
       </div>
-      {hits.length > 0 && (
-        <div className="absolute bottom-full left-0 right-0 mb-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-[110] max-h-32 overflow-y-auto">
-          {hits.length > 3 && (
+      {hasResults && (
+        <div className="absolute bottom-full left-0 right-0 mb-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-[110] max-h-40 overflow-y-auto">
+          {countryEntries.map((entry) => (
             <button
+              key={`country-${entry.code}`}
               onMouseDown={(e) => {
                 e.preventDefault();
-                hits.forEach((a) => onAdd(a.iata));
-                setQ("");
+                addAll(entry.cities.map((a) => a.iata));
               }}
-              className="w-full text-left px-2 py-0.5 text-[9px] hover:bg-[#21262d] font-semibold border-b border-[#30363d]"
+              className="w-full text-left px-2 py-1 text-[9px] hover:bg-[#21262d] font-semibold border-b border-[#30363d] flex items-center gap-1.5"
               style={{ color }}
             >
-              + Add all {hits.length} cities
+              <span className="text-[10px]">🌍</span>
+              <span>{entry.name}</span>
+              <span className="text-[#484f58] font-normal ml-auto">{entry.cities.length} cities</span>
             </button>
-          )}
-          {hits.slice(0, 8).map((a) => (
+          ))}
+          {cityHits.map((a) => (
             <button
               key={a.iata}
               onMouseDown={(e) => { e.preventDefault(); onAdd(a.iata); setQ(""); }}
