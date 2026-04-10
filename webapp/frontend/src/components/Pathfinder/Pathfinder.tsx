@@ -444,12 +444,6 @@ function PathCard({
       }`}
     >
       <div className="flex items-center gap-2 w-max">
-        <input
-          type="checkbox"
-          checked={isSelected}
-          onChange={() => {}}
-          className="accent-[#58a6ff] w-3 h-3 shrink-0 pointer-events-none"
-        />
         <span
           onClick={handlePriceClick}
           className="text-xs font-bold text-[#3fb950] tabular-nums hover:underline hover:text-[#56d364] cursor-pointer"
@@ -472,8 +466,8 @@ function PathCard({
                 {cityName(iata)}
               </span>
               {i < result.path.length - 1 && (
-                <span className="text-[10px] font-bold" style={{ color }}>
-                  {"\u2192"}
+                <span className="text-[11px] font-bold px-0.5" style={{ color }}>
+                  {"——→"}
                 </span>
               )}
             </span>

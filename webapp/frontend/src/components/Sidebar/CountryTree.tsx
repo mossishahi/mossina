@@ -24,10 +24,10 @@ export default function CountryTree() {
   const [query, setQuery] = useState("");
 
   const grouped = useMemo(() => {
-    const map = new Map<string, { name: string; airports: typeof airports }>();
+    const map = new Map<string, { name: string; code: string; airports: typeof airports }>();
     airports.forEach((a) => {
       if (!map.has(a.country)) {
-        map.set(a.country, { name: a.country, airports: [] });
+        map.set(a.country, { name: a.country, code: a.country_code || a.country, airports: [] });
       }
       map.get(a.country)!.airports.push(a);
     });
@@ -139,10 +139,10 @@ export default function CountryTree() {
                   className="accent-[#58a6ff] w-2.5 h-2.5"
                 />
                 <span className="text-[11px] text-[#c9d1d9] flex-1 truncate">
-                  {countryFlag(country)} {data.name}
+                  {countryFlag(data.code)} {data.name}
                 </span>
                 <span className="text-[9px] text-[#484f58] font-mono">
-                  {country.toUpperCase()}
+                  {data.code.toUpperCase()}
                 </span>
                 <span className="text-[10px] text-[#484f58]">
                   {data.airports.length}
