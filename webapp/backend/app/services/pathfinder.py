@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.fare import Fare
 from app.schemas.search import (
     CycleSearchRequest,
+    HopConstraint,
+    LegConstraint,
     PathLeg,
     PathResult,
     PathSearchRequest,
@@ -279,6 +281,28 @@ def _sequential_best_cost(
     return fb_total if fb_total > 0 else None, True, per_leg_fb
 
 
+def _hop_ok(city: str, hop_idx: int, hop_filters: list[HopConstraint] | None) -> bool:
+    """Check if a city is allowed at hop position hop_idx."""
+    if not hop_filters or hop_idx >= len(hop_filters):
+        return True
+    hf = hop_filters[hop_idx]
+    if hf.include_cities and city not in hf.include_cities:
+        return False
+    if hf.exclude_cities and city in hf.exclude_cities:
+        return False
+    return True
+
+
+def _leg_ok(airline: str, leg_idx: int, leg_filters: list[LegConstraint] | None) -> bool:
+    """Check if an airline is allowed on leg at position leg_idx."""
+    if not leg_filters or leg_idx >= len(leg_filters):
+        return True
+    lf = leg_filters[leg_idx]
+    if lf.airline and airline != lf.airline:
+        return False
+    return True
+
+
 def _build_adjacency_with_airlines(
     edges: list[tuple[str, str, str]],
 ) -> dict[str, list[tuple[str, str]]]:
@@ -326,6 +350,9 @@ async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResp
                 return True
         return False
 
+    hop_filters = request.hop_filters
+    leg_filters = request.leg_filters
+
     def dfs_path(
         current: str,
         path_nodes: list[str],
@@ -337,17 +364,25 @@ async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResp
         if over_budget():
             return
         if current in dest_set and len(path_edges) >= 1:
-            interiors_ok = (not request.only_selected) or all(
-                x in allowed_intermediate for x in path_nodes[1:-1]
-            )
-            if interiors_ok:
-                results.append(_build_path_result(path_nodes, path_edges, leg_fares))
+            last_hop_idx = len(path_nodes) - 1
+            if _hop_ok(current, last_hop_idx, hop_filters):
+                interiors_ok = (not request.only_selected) or all(
+                    x in allowed_intermediate for x in path_nodes[1:-1]
+                )
+                if interiors_ok:
+                    results.append(_build_path_result(path_nodes, path_edges, leg_fares))
         if len(path_edges) >= request.max_hops:
             return
+        leg_idx = len(path_edges)
         for nxt, airline in adj.get(current, []):
             if over_budget():
                 return
             if nxt in visited:
+                continue
+            if not _leg_ok(airline, leg_idx, leg_filters):
+                continue
+            nxt_hop_idx = len(path_nodes)
+            if not _hop_ok(nxt, nxt_hop_idx, hop_filters):
                 continue
             next_nodes = path_nodes + [nxt]
             if request.only_selected:
@@ -363,6 +398,8 @@ async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResp
         if over_budget():
             break
         if origin not in adj and origin not in all_nodes:
+            continue
+        if not _hop_ok(origin, 0, hop_filters):
             continue
         dfs_path(origin, [origin], [], {origin})
 
@@ -407,6 +444,9 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
                 return True
         return False
 
+    hop_filters = request.hop_filters
+    leg_filters = request.leg_filters
+
     def dfs_cycle(
         start: str,
         current: str,
@@ -418,9 +458,12 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
         node_visits += 1
         if over_budget():
             return
+        leg_idx = len(path_edges)
         for nxt, airline in adj.get(current, []):
             if over_budget():
                 return
+            if not _leg_ok(airline, leg_idx, leg_filters):
+                continue
             if nxt == start and len(path_edges) >= 1:
                 total_edges = len(path_edges) + 1
                 if total_edges > request.max_hops:
@@ -439,6 +482,9 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
                 continue
             if nxt in visited:
                 continue
+            nxt_hop_idx = len(path_nodes)
+            if not _hop_ok(nxt, nxt_hop_idx, hop_filters):
+                continue
             if len(path_edges) + 1 >= request.max_hops:
                 continue
             if request.only_selected:
@@ -454,6 +500,8 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
         if over_budget():
             break
         if start not in adj:
+            continue
+        if not _hop_ok(start, 0, hop_filters):
             continue
         dfs_cycle(start, start, [start], [], {start})
 

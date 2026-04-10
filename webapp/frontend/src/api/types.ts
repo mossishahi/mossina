@@ -68,6 +68,17 @@ export interface AirlineInfo {
   color: string;
 }
 
+export interface HopConstraint {
+  min_stay_days?: number | null;
+  max_stay_days?: number | null;
+  include_cities?: string[] | null;
+  exclude_cities?: string[] | null;
+}
+
+export interface LegConstraint {
+  airline?: string | null;
+}
+
 export interface PathSearchRequest {
   origins: string[];
   destinations: string[];
@@ -76,6 +87,8 @@ export interface PathSearchRequest {
   date_to: string;
   only_selected?: boolean;
   airline?: string;
+  hop_filters?: HopConstraint[] | null;
+  leg_filters?: LegConstraint[] | null;
 }
 
 export interface CycleSearchRequest {
@@ -84,6 +97,8 @@ export interface CycleSearchRequest {
   date_from: string;
   date_to: string;
   only_selected?: boolean;
+  hop_filters?: HopConstraint[] | null;
+  leg_filters?: LegConstraint[] | null;
 }
 
 export interface ExchangeRate {

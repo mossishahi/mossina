@@ -5,6 +5,19 @@ from datetime import date
 from pydantic import BaseModel, ConfigDict
 
 
+class HopConstraint(BaseModel):
+    """Filter for a specific hop position (0 = origin, N = destination)."""
+    min_stay_days: int | None = None
+    max_stay_days: int | None = None
+    include_cities: list[str] | None = None
+    exclude_cities: list[str] | None = None
+
+
+class LegConstraint(BaseModel):
+    """Filter for the connection between hop i and hop i+1."""
+    airline: str | None = None
+
+
 class PathSearchRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -15,6 +28,8 @@ class PathSearchRequest(BaseModel):
     date_to: date | None = None
     only_selected: bool
     airline: str | None = None
+    hop_filters: list[HopConstraint] | None = None
+    leg_filters: list[LegConstraint] | None = None
 
 
 class CycleSearchRequest(BaseModel):
@@ -25,6 +40,8 @@ class CycleSearchRequest(BaseModel):
     date_from: date | None = None
     date_to: date | None = None
     only_selected: bool
+    hop_filters: list[HopConstraint] | None = None
+    leg_filters: list[LegConstraint] | None = None
 
 
 class PathLeg(BaseModel):
