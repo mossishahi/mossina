@@ -117,12 +117,12 @@ export default function CityPicker({ selected, onToggle, airports, placeholder, 
 
   const atMax = maxSelect != null && selected.size >= maxSelect;
 
-  function renderAirport(a: Airport, section: "reachable" | "other" | "all" = "all") {
+  function renderAirport(a: Airport, keyPrefix = "") {
     const isSel = selected.has(a.iata);
     const disabled = !isSel && atMax;
     return (
       <button
-        key={a.iata}
+        key={keyPrefix + a.iata}
         onMouseDown={(e) => {
           e.preventDefault();
           if (!disabled) { onToggle(a.iata); if (!isSel) setQuery(""); }
@@ -145,16 +145,13 @@ export default function CityPicker({ selected, onToggle, airports, placeholder, 
     );
   }
 
-  function renderGroup(group: typeof filtered[0], section: "reachable" | "other" | "all" = "all") {
-    const isOther = section === "other";
+  function renderGroup(group: typeof filtered[0], keyPrefix = "") {
     return (
-      <div key={group.code + (isOther ? "-other" : "")}>
-        <div className={`px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider sticky top-0 border-b border-[#21262d] ${
-          isOther ? "text-[#484f58] bg-[#0d1117]" : "text-[#484f58] bg-[#161b22]"
-        }`}>
+      <div key={keyPrefix + group.code}>
+        <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider sticky top-0 border-b border-[#21262d] text-[#484f58] bg-[#161b22]">
           {group.countryName}
         </div>
-        {group.airports.map((a) => renderAirport(a, section))}
+        {group.airports.map((a) => renderAirport(a, keyPrefix))}
       </div>
     );
   }
@@ -183,7 +180,7 @@ export default function CityPicker({ selected, onToggle, airports, placeholder, 
           </span>
         </div>
       )}
-      {reachableGroups.map((g) => renderGroup(g, "reachable"))}
+      {reachableGroups.map((g) => renderGroup(g))}
 
       {reachable && otherGroups.length > 0 && (
         <div className={`px-2 pt-2 pb-1 ${reachableGroups.length > 0 ? "border-t border-[#21262d] mt-1" : ""}`}>
@@ -192,7 +189,7 @@ export default function CityPicker({ selected, onToggle, airports, placeholder, 
           </span>
         </div>
       )}
-      {otherGroups.map((g) => renderGroup(g, "other"))}
+      {otherGroups.map((g) => renderGroup(g, "other-"))}
 
       {atMax && (
         <p className="text-xs text-[#484f58] text-center py-2 border-t border-[#21262d]">

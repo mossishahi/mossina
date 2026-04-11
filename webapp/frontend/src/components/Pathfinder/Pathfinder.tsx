@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, ExternalLink } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useSearchPaths, useSearchCycles } from "@/hooks/useSearch";
 import { useAirports } from "@/hooks/useAirports";
 import { useMapStore } from "@/stores/mapStore";
@@ -7,7 +8,8 @@ import { useFilterStore } from "@/stores/filterStore";
 import { usePathStore, pathKey_ } from "@/stores/pathStore";
 import { useTabStore } from "@/stores/tabStore";
 import { AIRLINE_META } from "@/api/types";
-import type { PathResult } from "@/api/types";
+import { getFares } from "@/api/client";
+import type { PathResult, PathLeg } from "@/api/types";
 import SearchControls from "./SearchControls";
 
 export default function Pathfinder() {
@@ -104,16 +106,13 @@ export default function Pathfinder() {
 
   function getGroupKey(p: PathResult): string {
     if (isCycle) {
-      // Group cycles by their unique intermediate cities (path starts and ends at origin)
       const origin = p.path[0];
       const intermediates = [...new Set(p.path.slice(1, -1).filter((c) => c !== origin))].sort();
       return intermediates.length > 0 ? intermediates.join("+") : (p.path[1] || origin);
     } else {
-      // Group paths by which "to" cities appear in the path, excluding "from" cities
       const keyCities = [...destinationCities]
         .filter((d) => !originCities.has(d) && p.path.includes(d))
         .sort();
-      // Fallback to terminal city if none of the selected destinations appear
       return keyCities.length > 0 ? keyCities.join("+") : p.path[p.path.length - 1];
     }
   }
@@ -131,7 +130,6 @@ export default function Pathfinder() {
     return g;
   }, [results, isCycle, destinationCities, originCities]);
 
-  // Sort groups by their cheapest path
   const groupKeys = useMemo(
     () =>
       Object.keys(grouped).sort((a, b) => {
@@ -142,7 +140,6 @@ export default function Pathfinder() {
     [grouped],
   );
 
-  // Auto-open the cheapest group when results first arrive
   useMemo(() => {
     if (groupKeys.length > 0 && openGroups.size === 0) {
       setOpenGroups(new Set([groupKeys[0]]));
@@ -344,7 +341,6 @@ function PathCard({
       ? `${result.is_partial ? "~" : ""}${Math.round(cost)}\u20AC`
       : "--";
 
-  // Default to 1-day minimum stay per hop
   const defaultMinDays = result.legs.map(() => 24);
 
   function handlePriceClick(e: React.MouseEvent) {
@@ -362,16 +358,17 @@ function PathCard({
         togglePath(result, activeTab);
         if (!isSelected) setMinDays(pathKey, defaultMinDays);
       }}
-      className={`group rounded-lg px-2.5 py-2 transition-all cursor-pointer overflow-x-auto border ${
+      className={`rounded-lg transition-all cursor-pointer border ${
         isSelected
           ? "bg-[#58a6ff]/10 border-[#58a6ff]/30"
           : "bg-[#0d1117] hover:bg-[#161b22] border-[#21262d] hover:border-[#30363d]"
       }`}
     >
-      <div className="flex items-center gap-2 w-max">
+      {/* Path summary — scrollable row */}
+      <div className="flex items-center gap-2 px-2.5 py-2 overflow-x-auto w-full">
         <span
           onClick={handlePriceClick}
-          className="text-sm font-bold text-[#3fb950] tabular-nums hover:underline hover:text-[#56d364] cursor-pointer"
+          className="text-sm font-bold text-[#3fb950] tabular-nums hover:underline hover:text-[#56d364] cursor-pointer shrink-0"
           title="Click to highlight cheapest dates"
         >
           {costLabel}
@@ -383,7 +380,7 @@ function PathCard({
             ? AIRLINE_META[leg.airline]?.color || "#8b949e"
             : "#8b949e";
           return (
-            <span key={i} className="inline-flex items-center gap-0.5">
+            <span key={i} className="inline-flex items-center gap-0.5 shrink-0">
               <span
                 className="text-xs text-[#c9d1d9] font-medium whitespace-nowrap"
                 title={`${cityName(iata)} (${iata})`}
@@ -400,6 +397,117 @@ function PathCard({
           );
         })}
       </div>
+
+      {/* Inline leg details — shown when selected */}
+      {isSelected && (
+        <div className="border-t border-[#21262d] divide-y divide-[#21262d]">
+          {result.legs.map((leg, i) => (
+            <LegInlineDetail key={i} leg={leg} cityName={cityName} />
+          ))}
+        </div>
+      )}
     </div>
   );
+}
+
+function LegInlineDetail({
+  leg,
+  cityName,
+}: {
+  leg: PathLeg;
+  cityName: (iata: string) => string;
+}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["fare-inline", leg.origin, leg.destination, leg.airline, leg.best_date],
+    queryFn: () =>
+      getFares(leg.origin, leg.destination, {
+        date_from: leg.best_date!,
+        date_to: leg.best_date!,
+      }),
+    enabled: !!leg.best_date,
+    staleTime: 120_000,
+  });
+
+  const fare = data?.fares?.find((f) => f.airline === leg.airline);
+  const meta = AIRLINE_META[leg.airline];
+  const color = meta?.color || "#8b949e";
+
+  const dateLabel = leg.best_date
+    ? new Date(leg.best_date + "T00:00:00").toLocaleDateString("en-GB", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      })
+    : null;
+
+  return (
+    <div
+      className="flex items-center gap-2 px-3 py-2 text-xs"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Airline dot */}
+      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+
+      {/* Route */}
+      <span className="text-[#c9d1d9] shrink-0">
+        {cityName(leg.origin)}
+        <span className="mx-1 font-bold" style={{ color }}>→</span>
+        {cityName(leg.destination)}
+      </span>
+
+      {/* Airline name */}
+      <span className="text-[#484f58] shrink-0">{meta?.name || leg.airline}</span>
+
+      <span className="flex-1" />
+
+      {/* Date */}
+      {dateLabel && (
+        <span className="text-[#8b949e] shrink-0">{dateLabel}</span>
+      )}
+
+      {/* Time */}
+      {isLoading && leg.best_date && (
+        <span className="text-[#484f58] tabular-nums shrink-0">…</span>
+      )}
+      {fare?.departure_time && (
+        <span className="text-[#8b949e] tabular-nums shrink-0">
+          {fare.departure_time}
+          {fare.arrival_time && (
+            <span className="text-[#484f58]">–{fare.arrival_time}</span>
+          )}
+        </span>
+      )}
+
+      {/* Flight number */}
+      {fare?.flight_number && (
+        <span className="text-[#484f58] font-mono shrink-0">{fare.flight_number}</span>
+      )}
+
+      {/* Price */}
+      <span className="text-[#3fb950] font-semibold tabular-nums shrink-0">
+        {leg.cost_eur != null ? `${leg.cost_eur.toFixed(2)}€` : "--"}
+      </span>
+
+      {/* Booking link */}
+      {leg.best_date && (
+        <a
+          href={buildBookingUrl(leg.airline, leg.origin, leg.destination, leg.best_date)}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-[#58a6ff] hover:text-[#79c0ff] shrink-0"
+          title="Book this flight"
+        >
+          <ExternalLink size={11} />
+        </a>
+      )}
+    </div>
+  );
+}
+
+function buildBookingUrl(airline: string, from: string, to: string, date: string): string {
+  if (airline === "W6") {
+    return `https://wizzair.com/en-gb/booking/select-flight/${from}/${to}/${date}/null/1/0/0/0/null`;
+  }
+  return `https://www.ryanair.com/gb/en/trip/flights/select?adults=1&teens=0&children=0&infants=0&dateOut=${date}&isConnectedFlight=false&isReturn=false&originIata=${from}&destinationIata=${to}`;
 }
