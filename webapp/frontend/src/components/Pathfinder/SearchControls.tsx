@@ -1,6 +1,8 @@
-import { Loader2, Search, Compass } from "lucide-react";
+import { useMemo } from "react";
+import { Loader2, Search, Compass, AlertTriangle } from "lucide-react";
 import { useMapStore } from "@/stores/mapStore";
 import { useAirports } from "@/hooks/useAirports";
+import { useRoutes } from "@/hooks/useRoutes";
 import { useTabStore } from "@/stores/tabStore";
 import CityPicker from "./CityPicker";
 
@@ -23,6 +25,7 @@ export default function SearchControls({
   const toggleOrigin = useMapStore((s) => s.toggleOrigin);
   const toggleDestination = useMapStore((s) => s.toggleDestination);
   const { data: airports = [] } = useAirports();
+  const { data: routes = [] } = useRoutes();
   const activeTab = useTabStore((s) => s.activeTab);
   const isCycle = activeTab === "cycles";
   const anyPending = pathPending || cyclePending;
@@ -30,6 +33,29 @@ export default function SearchControls({
   const canSearch = isCycle
     ? originCities.size > 0
     : originCities.size > 0 && destinationCities.size > 0;
+
+  // Airports directly reachable from any selected origin
+  const reachableFromOrigins = useMemo(() => {
+    if (originCities.size === 0) return undefined;
+    const reachable = new Set<string>();
+    routes.forEach((r) => {
+      if (originCities.has(r.origin)) reachable.add(r.destination);
+    });
+    return reachable;
+  }, [routes, originCities]);
+
+  // Name map for warning labels
+  const nameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    airports.forEach((a) => m.set(a.iata, a.city || a.name || a.iata));
+    return m;
+  }, [airports]);
+
+  // Selected destinations that have no direct flight from any origin
+  const unreachableDests = useMemo(() => {
+    if (!reachableFromOrigins || destinationCities.size === 0) return [];
+    return [...destinationCities].filter((iata) => !reachableFromOrigins.has(iata));
+  }, [reachableFromOrigins, destinationCities]);
 
   return (
     <div className="bg-black/80 backdrop-blur-xl border border-[#30363d] rounded-xl overflow-hidden">
@@ -63,7 +89,18 @@ export default function SearchControls({
               onToggle={toggleDestination}
               airports={airports}
               placeholder="Search cities…"
+              reachable={reachableFromOrigins}
             />
+            {unreachableDests.length > 0 && (
+              <div className="flex items-start gap-1.5 text-xs text-[#9e6a03] bg-[#9e6a03]/10 border border-[#9e6a03]/30 rounded-md px-2.5 py-2">
+                <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                <span>
+                  No direct flights to{" "}
+                  {unreachableDests.map((iata) => nameMap.get(iata) || iata).join(", ")}
+                  {" "}from selected origins
+                </span>
+              </div>
+            )}
           </div>
         )}
 
