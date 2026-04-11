@@ -82,8 +82,12 @@ def snapshot_routes(session, airline_code, log):
 
 
 def run_scrape(args, log):
-    """Run a single scrape pass for the configured airlines."""
+    """Run a single scrape pass for the configured airlines.
+
+    Returns True if data was scraped successfully, False otherwise.
+    """
     session = SessionLocal()
+    success = False
     try:
         if args.airline.lower() == "all":
             codes = [code for code, _ in list_airlines()]
@@ -126,10 +130,22 @@ def run_scrape(args, log):
             log.info("Recording %s route availability ...", code)
             snapshot_routes(session, code, log)
 
+            fare_count = session.execute(
+                text("SELECT COUNT(*) FROM fares WHERE airline = :a AND scraped_at > now() - interval '2 hours'"),
+                {"a": code},
+            ).scalar() or 0
+
+            if fare_count == 0:
+                log.error("[%s] FAILED: 0 fares stored in this scrape!", code)
+            else:
+                log.info("[%s] Verified: %d fresh fares in database.", code, fare_count)
+                success = True
+
     except Exception:
         log.exception("Scrape pass failed")
     finally:
         session.close()
+    return success
 
 
 def main():
@@ -171,8 +187,12 @@ def main():
     log = setup_logging()
 
     if not args.loop:
-        run_scrape(args, log)
-        log.info("Done.")
+        ok = run_scrape(args, log)
+        if ok:
+            log.info("Done.")
+        else:
+            log.error("Scrape finished with 0 fares — marking as FAILED.")
+            sys.exit(1)
         return
 
     log.info("Starting continuous scraper (every %d minutes)", args.interval)
