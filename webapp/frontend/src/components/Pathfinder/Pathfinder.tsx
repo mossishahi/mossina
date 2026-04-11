@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { ChevronRight } from "lucide-react";
 import { useSearchPaths, useSearchCycles } from "@/hooks/useSearch";
 import { useAirports } from "@/hooks/useAirports";
@@ -7,12 +7,8 @@ import { useFilterStore } from "@/stores/filterStore";
 import { usePathStore, pathKey_ } from "@/stores/pathStore";
 import { useTabStore } from "@/stores/tabStore";
 import { AIRLINE_META } from "@/api/types";
-import type { PathResult, HopConstraint, LegConstraint } from "@/api/types";
+import type { PathResult } from "@/api/types";
 import SearchControls from "./SearchControls";
-import HopFilter, { emptyHop, isHopActive } from "./HopFilter";
-import type { HopFilterValue } from "./HopFilter";
-import LegArrow, { emptyLeg } from "./LegArrow";
-import type { LegFilterValue } from "./LegArrow";
 
 export default function Pathfinder() {
   const activeTab = useTabStore((s) => s.activeTab);
@@ -20,10 +16,8 @@ export default function Pathfinder() {
   const label = isCycle ? "cycle" : "path";
 
   const [maxHops, setMaxHops] = useState(3);
-  const [openGroupsPath, setOpenGroupsPath] = useState<Set<number>>(new Set());
-  const [openGroupsCycle, setOpenGroupsCycle] = useState<Set<number>>(new Set());
-  const [hopFilters, setHopFilters] = useState<Record<number, HopFilterValue[]>>({});
-  const [legFilters, setLegFilters] = useState<Record<number, LegFilterValue[]>>({});
+  const [openGroupsPath, setOpenGroupsPath] = useState<Set<string>>(new Set());
+  const [openGroupsCycle, setOpenGroupsCycle] = useState<Set<string>>(new Set());
   const originCities = useMapStore((s) => s.originCities);
   const destinationCities = useMapStore((s) => s.destinationCities);
   const activeAirlines = useMapStore((s) => s.activeAirlines);
@@ -38,11 +32,9 @@ export default function Pathfinder() {
 
   const clearPaths = usePathStore((s) => s.clearPaths);
   const setSearchActive = usePathStore((s) => s.setSearchActive);
-  const updateSelectedResults = usePathStore((s) => s.updateSelectedResults);
 
   const pathMutation = useSearchPaths();
   const cycleMutation = useSearchCycles();
-  const lastSearchRef = useRef<{ from: string; to: string; origins: string[]; destinations: string[]; airline?: string } | null>(null);
 
   const prevOriginsRef = useRef(originCities);
   const prevDestsRef = useRef(destinationCities);
@@ -54,8 +46,6 @@ export default function Pathfinder() {
       setSearchActive(false);
       pathMutation.reset();
       cycleMutation.reset();
-      setHopFilters({});
-      setLegFilters({});
       setOpenGroupsPath(new Set());
       setOpenGroupsCycle(new Set());
     }
@@ -75,13 +65,10 @@ export default function Pathfinder() {
 
     setOpenGroupsPath(new Set());
     setOpenGroupsCycle(new Set());
-    setHopFilters({});
-    setLegFilters({});
     clearPaths();
     setSearchActive(true);
 
     const al = activeAirlines.size === 1 ? [...activeAirlines][0] : undefined;
-    lastSearchRef.current = { from, to, origins, destinations, airline: al };
 
     pathMutation.mutate({
       origins,
@@ -111,128 +98,65 @@ export default function Pathfinder() {
   const pathCount = pathMutation.data?.results?.length ?? 0;
   const cycleCount = cycleMutation.data?.results?.length ?? 0;
 
-  const filtered = useMemo(() => results, [results]);
+  function cityName(iata: string) {
+    return nameMap.get(iata) || iata;
+  }
+
+  function getGroupKey(p: PathResult): string {
+    if (isCycle) {
+      // Group cycles by their unique intermediate cities (path starts and ends at origin)
+      const origin = p.path[0];
+      const intermediates = [...new Set(p.path.slice(1, -1).filter((c) => c !== origin))].sort();
+      return intermediates.length > 0 ? intermediates.join("+") : (p.path[1] || origin);
+    } else {
+      // Group paths by which "to" cities appear in the path, excluding "from" cities
+      const keyCities = [...destinationCities]
+        .filter((d) => !originCities.has(d) && p.path.includes(d))
+        .sort();
+      // Fallback to terminal city if none of the selected destinations appear
+      return keyCities.length > 0 ? keyCities.join("+") : p.path[p.path.length - 1];
+    }
+  }
 
   const grouped = useMemo(() => {
-    const g: Record<number, PathResult[]> = {};
-    filtered.forEach((p) => {
-      const n = p.legs.length;
-      if (!g[n]) g[n] = [];
-      g[n].push(p);
+    const g: Record<string, PathResult[]> = {};
+    results.forEach((p) => {
+      const key = getGroupKey(p);
+      if (!g[key]) g[key] = [];
+      g[key].push(p);
     });
     Object.values(g).forEach((arr) =>
       arr.sort((a, b) => (a.total_cost_eur ?? Infinity) - (b.total_cost_eur ?? Infinity)),
     );
     return g;
-  }, [filtered]);
+  }, [results, isCycle, destinationCities, originCities]);
 
-  const lengths = Object.keys(grouped).map(Number).sort((a, b) => a - b);
+  // Sort groups by their cheapest path
+  const groupKeys = useMemo(
+    () =>
+      Object.keys(grouped).sort((a, b) => {
+        const minA = grouped[a][0]?.total_cost_eur ?? Infinity;
+        const minB = grouped[b][0]?.total_cost_eur ?? Infinity;
+        return minA - minB;
+      }),
+    [grouped],
+  );
 
+  // Auto-open the cheapest group when results first arrive
   useMemo(() => {
-    if (lengths.length > 0 && openGroups.size === 0) {
-      setOpenGroups(new Set([lengths[0]]));
+    if (groupKeys.length > 0 && openGroups.size === 0) {
+      setOpenGroups(new Set([groupKeys[0]]));
     }
   }, [results]);
 
-  function toggleGroup(n: number) {
+  function toggleGroup(key: string) {
     setOpenGroups((prev) => {
       const next = new Set(prev);
-      if (next.has(n)) next.delete(n);
-      else next.add(n);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
-
-  function cityName(iata: string) {
-    return nameMap.get(iata) || iata;
-  }
-
-  function getHopFiltersForLength(n: number): HopFilterValue[] {
-    if (hopFilters[n]) return hopFilters[n];
-    return Array.from({ length: n + 1 }, () => emptyHop());
-  }
-
-  function getLegFiltersForLength(n: number): LegFilterValue[] {
-    if (legFilters[n]) return legFilters[n];
-    return Array.from({ length: n }, () => emptyLeg());
-  }
-
-  const [repricing, setRepricing] = useState(false);
-  const repricingTimer = useRef<ReturnType<typeof setTimeout>>();
-
-  const updateHopFilter = useCallback((length: number, stopIdx: number, val: HopFilterValue) => {
-    setHopFilters((prev) => {
-      const current = prev[length] || Array.from({ length: length + 1 }, () => emptyHop());
-      const next = [...current];
-      next[stopIdx] = val;
-
-      const hasDays = next.some((h) => h.minDays != null || h.maxDays != null);
-      if (hasDays && lastSearchRef.current) {
-        clearTimeout(repricingTimer.current);
-        setRepricing(true);
-        const hopConstraints = next.map((h) => ({
-          min_stay_days: h.minDays,
-          max_stay_days: h.maxDays,
-          include_cities: h.includeCities.length > 0 ? h.includeCities : null,
-          exclude_cities: h.excludeCities.length > 0 ? h.excludeCities : null,
-        }));
-        repricingTimer.current = setTimeout(() => {
-          const s = lastSearchRef.current!;
-          const mutation = isCycle ? cycleMutation : pathMutation;
-          const base = isCycle
-            ? { origins: s.origins, max_hops: maxHops, date_from: s.from, date_to: s.to, only_selected: false }
-            : { origins: s.origins, destinations: s.destinations, max_hops: maxHops, date_from: s.from, date_to: s.to, only_selected: false, airline: s.airline };
-          mutation.mutate(
-            { ...base, hop_filters: hopConstraints } as any,
-            {
-              onSuccess: (data) => {
-                if (data?.results) {
-                  updateSelectedResults(data.results, isCycle ? "cycles" : "paths");
-                }
-              },
-              onSettled: () => setRepricing(false),
-            },
-          );
-        }, 600);
-      }
-
-      return { ...prev, [length]: next };
-    });
-  }, [isCycle, maxHops]);
-
-  const updateLegFilter = useCallback((length: number, legIdx: number, val: LegFilterValue) => {
-    setLegFilters((prev) => {
-      const current = prev[length] || Array.from({ length: length }, () => emptyLeg());
-      const next = [...current];
-      next[legIdx] = val;
-      return { ...prev, [length]: next };
-    });
-  }, []);
-
-  function applyHopFilters(paths: PathResult[], length: number): PathResult[] {
-    const hops = getHopFiltersForLength(length);
-    const legs = getLegFiltersForLength(length);
-    return paths.filter((p) => {
-      for (let i = 0; i < p.path.length; i++) {
-        const f = hops[i];
-        if (!f) continue;
-        if (f.includeCities.length > 0 && !f.includeCities.includes(p.path[i])) return false;
-        if (f.excludeCities.includes(p.path[i])) return false;
-      }
-      for (let i = 0; i < p.legs.length; i++) {
-        const lf = legs[i];
-        if (!lf) continue;
-        if (lf.airline && p.legs[i].airline !== lf.airline) return false;
-      }
-      return true;
-    });
-  }
-
-  const allAirlines = useMemo(() => {
-    const codes = new Set<string>();
-    results.forEach((r) => r.legs.forEach((l) => codes.add(l.airline)));
-    return [...codes].sort();
-  }, [results]);
 
   return (
     <>
@@ -268,77 +192,53 @@ export default function Pathfinder() {
           )}
 
           {results.length > 0 && (
-            <div className={`relative ${repricing ? "opacity-50 pointer-events-none" : ""}`}>
-              {repricing && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center">
-                  <span className="text-[10px] text-[#58a6ff] bg-[#0d1117]/80 px-3 py-1 rounded-full">Recalculating prices…</span>
-                </div>
-              )}
+            <div>
               <div className="pb-2">
                 <p className="text-xs text-[#484f58]">
-                  {filtered.length} {label}s
+                  {results.length} {label}s
                   {searchTimeMs != null && ` in ${(searchTimeMs / 1000).toFixed(1)}s`}
                 </p>
               </div>
 
-              {lengths.map((n) => {
-                const allPaths = grouped[n];
-                const hopFilteredPaths = applyHopFilters(allPaths, n);
-                const isOpen = openGroups.has(n);
-                const hf = getHopFiltersForLength(n);
+              {groupKeys.map((key) => {
+                const paths = grouped[key];
+                const isOpen = openGroups.has(key);
+                const minCost = paths[0]?.total_cost_eur;
+                const cityCodes = key.split("+");
+
                 return (
-                  <div key={n}>
+                  <div key={key}>
                     <button
-                      onClick={() => toggleGroup(n)}
+                      onClick={() => toggleGroup(key)}
                       className="w-full flex items-center gap-2 px-1 py-1.5 text-left hover:bg-[#161b22]/60 transition-colors border-t border-[#21262d]"
                     >
                       <ChevronRight
                         size={12}
-                        className={`text-[#8b949e] transition-transform ${isOpen ? "rotate-90" : ""}`}
+                        className={`text-[#8b949e] transition-transform shrink-0 ${isOpen ? "rotate-90" : ""}`}
                       />
-                      <span className="text-sm font-semibold text-[#58a6ff]">
-                        Length {n}
+                      <span className="text-sm font-semibold text-[#c9d1d9] truncate flex-1">
+                        {cityCodes.map((c) => cityName(c)).join(", ")}
                       </span>
-                      <span className="text-xs text-[#484f58] bg-[#161b22] px-1.5 py-0.5 rounded-full">
-                        {hopFilteredPaths.length !== allPaths.length
-                          ? `${hopFilteredPaths.length}/${allPaths.length}`
-                          : `${allPaths.length}`}
+                      {minCost != null && (
+                        <span className="text-xs text-[#3fb950] font-medium shrink-0">
+                          from {Math.round(minCost)}€
+                        </span>
+                      )}
+                      <span className="text-xs text-[#484f58] bg-[#161b22] px-1.5 py-0.5 rounded-full shrink-0">
+                        {paths.length}
                       </span>
                     </button>
 
                     {isOpen && (
-                      <div className="pb-1">
-                        <div className="flex gap-0.5 px-2 py-2 items-center justify-center">
-                          {Array.from({ length: n + 1 }, (_, i) => {
-                            const lf = getLegFiltersForLength(n);
-                            const isEndpoint = i === 0 || i === n;
-                            return (
-                              <span key={i} className="inline-flex items-center">
-                                <HopFilter
-                                  index={i}
-                                  isEndpoint={isEndpoint}
-                                  value={hf[i] || emptyHop()}
-                                  onChange={(val) => updateHopFilter(n, i, val)}
-                                />
-                                {i < n && (
-                                  <LegArrow
-                                    value={lf[i] || emptyLeg()}
-                                    onChange={(val) => updateLegFilter(n, i, val)}
-                                    airlines={allAirlines}
-                                  />
-                                )}
-                              </span>
-                            );
-                          })}
-                        </div>
-                        <div className="space-y-1">
-                          {hopFilteredPaths.map((p, i) => (
-                            <PathCard key={i} result={p} cityName={cityName} pathKey={pathKey_(p)} hopFilters={hf} legFilters={getLegFiltersForLength(n)} />
-                          ))}
-                          {hopFilteredPaths.length === 0 && (
-                            <p className="text-[10px] text-[#484f58] text-center py-2">No matches</p>
-                          )}
-                        </div>
+                      <div className="pb-1 space-y-1">
+                        {paths.map((p, i) => (
+                          <PathCard
+                            key={i}
+                            result={p}
+                            cityName={cityName}
+                            pathKey={pathKey_(p)}
+                          />
+                        ))}
                       </div>
                     )}
                   </div>
@@ -347,7 +247,7 @@ export default function Pathfinder() {
             </div>
           )}
 
-          {mutation.isSuccess && filtered.length === 0 && (
+          {mutation.isSuccess && results.length === 0 && (
             <p className="text-xs text-[#8b949e] text-center py-2">
               No {label}s found
             </p>
@@ -424,14 +324,10 @@ function PathCard({
   result,
   cityName,
   pathKey,
-  hopFilters,
-  legFilters,
 }: {
   result: PathResult;
   cityName: (iata: string) => string;
   pathKey: string;
-  hopFilters: HopFilterValue[];
-  legFilters: LegFilterValue[];
 }) {
   const activeTab = useTabStore((s) => s.activeTab);
   const selectedPaths = usePathStore((s) => s.selectedPaths);
@@ -448,11 +344,14 @@ function PathCard({
       ? `${result.is_partial ? "~" : ""}${Math.round(cost)}\u20AC`
       : "--";
 
+  // Default to 1-day minimum stay per hop
+  const defaultMinDays = result.legs.map(() => 24);
+
   function handlePriceClick(e: React.MouseEvent) {
     e.stopPropagation();
     if (!isSelected) {
       togglePath(result, activeTab);
-      setMinDays(pathKey, hopFilters.map((hf) => (hf.minDays ?? 1) * 24));
+      setMinDays(pathKey, defaultMinDays);
     }
     autoSelectBestDates(pathKey, result);
   }
@@ -461,9 +360,7 @@ function PathCard({
     <div
       onClick={() => {
         togglePath(result, activeTab);
-        if (!isSelected) {
-          setMinDays(pathKey, hopFilters.map((hf) => (hf.minDays ?? 1) * 24));
-        }
+        if (!isSelected) setMinDays(pathKey, defaultMinDays);
       }}
       className={`group rounded-lg px-2.5 py-2 transition-all cursor-pointer overflow-x-auto border ${
         isSelected
