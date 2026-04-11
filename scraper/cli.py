@@ -103,12 +103,14 @@ def run_scrape(args, log):
             log.info("Scraping routes ...")
             airline["scrape_routes"](session, airports)
 
-            log.info("Scraping fares ...")
             airport_codes = [a.iata if hasattr(a, "iata") else a for a in airports]
+
+            log.info("Scraping fares ...")
             airline["scrape_fares"](
                 session,
                 airports=airport_codes,
                 limit=args.limit,
+                days_fresh=args.refresh_days,
                 workers=args.workers,
             )
 

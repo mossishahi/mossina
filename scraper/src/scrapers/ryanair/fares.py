@@ -134,7 +134,7 @@ def _worker(worker_id, my_airports, date_from, date_to, scraped_at, write_q,
                 )
 
 
-def scrape_fares(session, airports, limit=None, workers=DEFAULT_WORKERS):
+def scrape_fares(session, airports, limit=None, workers=DEFAULT_WORKERS, **_kw):
     """Fetch cheapest one-way fares from each airport for the next ~6 months."""
     now = datetime.now(timezone.utc)
     date_from = now.strftime("%Y-%m-%d")
