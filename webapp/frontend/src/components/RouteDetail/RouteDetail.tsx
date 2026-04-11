@@ -25,9 +25,7 @@ export default function RouteDetail() {
   const tabLabel = activeTab === "cycles" ? "cycle" : "path";
 
   return (
-    <div className="absolute top-4 bottom-4 overflow-y-auto z-10 space-y-2 pr-1"
-      style={{ left: "calc(420px + 24px)", width: "400px" }}
-    >
+    <div className="w-[400px] shrink-0 overflow-y-auto space-y-2 pb-1 pr-1">
       <div className="flex items-center justify-between px-1 mb-1">
         <span className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">
           {selectedPaths.length} {tabLabel}{selectedPaths.length > 1 ? "s" : ""} selected

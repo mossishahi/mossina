@@ -13,17 +13,24 @@ export default function App() {
   } | null>(null);
 
   return (
-    <div className="relative w-full h-full">
-      <Globe onArcClick={(origin, destination, airline) =>
-        setFlightPopup({ origin, destination, airline })
-      } />
-
-      <div className="absolute top-4 left-4 bottom-4 w-[420px] overflow-y-auto z-10 space-y-2 pr-1">
-        <Sidebar />
-        <Pathfinder />
+    <div className="h-screen flex flex-col overflow-hidden bg-[#0d1117]">
+      {/* Controls row — scrollable, sits above the map */}
+      <div className="flex gap-3 px-3 pt-3 pb-2 overflow-y-auto shrink-0 max-h-[55vh]">
+        <div className="w-[420px] shrink-0 space-y-2 pb-1">
+          <Sidebar />
+          <Pathfinder />
+        </div>
+        <RouteDetail />
       </div>
 
-      <RouteDetail />
+      {/* Map — fills remaining height, full width */}
+      <div className="flex-1 min-h-[350px] w-full">
+        <Globe
+          onArcClick={(origin, destination, airline) =>
+            setFlightPopup({ origin, destination, airline })
+          }
+        />
+      </div>
 
       {flightPopup && (
         <FlightPopup

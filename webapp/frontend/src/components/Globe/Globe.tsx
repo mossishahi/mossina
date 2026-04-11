@@ -117,7 +117,7 @@ export default function Globe({ onArcClick }: Props) {
   }, [routeLines, pathLines, searchActive]);
 
   return (
-    <div className="absolute inset-0">
+    <div className="w-full h-full">
       <MapContainer
         center={[50, 15]}
         zoom={4}
