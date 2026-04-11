@@ -20,12 +20,12 @@ export default function Pathfinder() {
   const label = isCycle ? "cycle" : "path";
 
   const [maxHops, setMaxHops] = useState(3);
-  const [onlySelected, setOnlySelected] = useState(false);
   const [openGroupsPath, setOpenGroupsPath] = useState<Set<number>>(new Set());
   const [openGroupsCycle, setOpenGroupsCycle] = useState<Set<number>>(new Set());
   const [hopFilters, setHopFilters] = useState<Record<number, HopFilterValue[]>>({});
   const [legFilters, setLegFilters] = useState<Record<number, LegFilterValue[]>>({});
-  const selectedCities = useMapStore((s) => s.selectedCities);
+  const originCities = useMapStore((s) => s.originCities);
+  const destinationCities = useMapStore((s) => s.destinationCities);
   const activeAirlines = useMapStore((s) => s.activeAirlines);
   const { dateFrom, dateTo } = useFilterStore();
 
@@ -42,12 +42,14 @@ export default function Pathfinder() {
 
   const pathMutation = useSearchPaths();
   const cycleMutation = useSearchCycles();
-  const lastSearchRef = useRef<{ from: string; to: string; cities: string[]; airline?: string } | null>(null);
+  const lastSearchRef = useRef<{ from: string; to: string; origins: string[]; destinations: string[]; airline?: string } | null>(null);
 
-  const prevCitiesRef = useRef(selectedCities);
+  const prevOriginsRef = useRef(originCities);
+  const prevDestsRef = useRef(destinationCities);
   useEffect(() => {
-    if (prevCitiesRef.current !== selectedCities) {
-      prevCitiesRef.current = selectedCities;
+    if (prevOriginsRef.current !== originCities || prevDestsRef.current !== destinationCities) {
+      prevOriginsRef.current = originCities;
+      prevDestsRef.current = destinationCities;
       clearPaths();
       setSearchActive(false);
       pathMutation.reset();
@@ -57,11 +59,12 @@ export default function Pathfinder() {
       setOpenGroupsPath(new Set());
       setOpenGroupsCycle(new Set());
     }
-  }, [selectedCities]);
+  }, [originCities, destinationCities]);
 
   function handleSearchBoth() {
-    const cities = [...selectedCities];
-    if (cities.length === 0) return;
+    const origins = [...originCities];
+    const destinations = [...destinationCities];
+    if (origins.length === 0) return;
 
     const from = dateFrom || new Date().toISOString().slice(0, 10);
     const to =
@@ -78,11 +81,11 @@ export default function Pathfinder() {
     setSearchActive(true);
 
     const al = activeAirlines.size === 1 ? [...activeAirlines][0] : undefined;
-    lastSearchRef.current = { from, to, cities, airline: al };
+    lastSearchRef.current = { from, to, origins, destinations, airline: al };
 
     pathMutation.mutate({
-      origins: cities,
-      destinations: cities,
+      origins,
+      destinations: destinations.length > 0 ? destinations : origins,
       max_hops: maxHops,
       date_from: from,
       date_to: to,
@@ -91,7 +94,7 @@ export default function Pathfinder() {
     });
 
     cycleMutation.mutate({
-      origins: cities,
+      origins,
       max_hops: maxHops,
       date_from: from,
       date_to: to,
@@ -108,10 +111,7 @@ export default function Pathfinder() {
   const pathCount = pathMutation.data?.results?.length ?? 0;
   const cycleCount = cycleMutation.data?.results?.length ?? 0;
 
-  const filtered = useMemo(() => {
-    if (!onlySelected || selectedCities.size === 0) return results;
-    return results.filter((p) => p.path.every((iata) => selectedCities.has(iata)));
-  }, [results, onlySelected, selectedCities]);
+  const filtered = useMemo(() => results, [results]);
 
   const grouped = useMemo(() => {
     const g: Record<number, PathResult[]> = {};
@@ -180,8 +180,8 @@ export default function Pathfinder() {
           const s = lastSearchRef.current!;
           const mutation = isCycle ? cycleMutation : pathMutation;
           const base = isCycle
-            ? { origins: s.cities, max_hops: maxHops, date_from: s.from, date_to: s.to, only_selected: false }
-            : { origins: s.cities, destinations: s.cities, max_hops: maxHops, date_from: s.from, date_to: s.to, only_selected: false, airline: s.airline };
+            ? { origins: s.origins, max_hops: maxHops, date_from: s.from, date_to: s.to, only_selected: false }
+            : { origins: s.origins, destinations: s.destinations, max_hops: maxHops, date_from: s.from, date_to: s.to, only_selected: false, airline: s.airline };
           mutation.mutate(
             { ...base, hop_filters: hopConstraints } as any,
             {
@@ -274,26 +274,11 @@ export default function Pathfinder() {
                   <span className="text-[10px] text-[#58a6ff] bg-[#0d1117]/80 px-3 py-1 rounded-full">Recalculating prices…</span>
                 </div>
               )}
-              <div className="pb-2 space-y-1.5">
+              <div className="pb-2">
                 <p className="text-[11px] text-[#484f58]">
-                  {filtered.length}
-                  {onlySelected && filtered.length !== results.length
-                    ? ` of ${results.length}`
-                    : ""}{" "}
-                  {label}s
+                  {filtered.length} {label}s
                   {searchTimeMs != null && ` in ${(searchTimeMs / 1000).toFixed(1)}s`}
                 </p>
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={onlySelected}
-                    onChange={(e) => setOnlySelected(e.target.checked)}
-                    className="accent-[#58a6ff] w-3 h-3 rounded"
-                  />
-                  <span className="text-[11px] text-[#8b949e]">
-                    Only selected cities
-                  </span>
-                </label>
               </div>
 
               {lengths.map((n) => {
@@ -364,15 +349,13 @@ export default function Pathfinder() {
 
           {mutation.isSuccess && filtered.length === 0 && (
             <p className="text-xs text-[#8b949e] text-center py-2">
-              {results.length > 0 && onlySelected
-                ? "No results match the selected cities filter"
-                : `No ${label}s found`}
+              No {label}s found
             </p>
           )}
 
           {!mutation.isSuccess && !mutation.isPending && !mutation.isError && (
             <p className="text-xs text-[#484f58] text-center py-2">
-              Select cities and press Search
+              Choose origins and destinations, then Search
             </p>
           )}
         </div>

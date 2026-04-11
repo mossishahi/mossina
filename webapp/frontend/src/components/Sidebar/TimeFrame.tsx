@@ -8,7 +8,7 @@ function toISODate(d: Date): string {
 
 export default function TimeFrame() {
   const { dateFrom, dateTo, setDateRange, clearDateRange } = useFilterStore();
-  const clearSelection = useMapStore((s) => s.clearSelection);
+  const clearAll = useMapStore((s) => s.clearAll);
 
   const today = toISODate(new Date());
   const oneWeek = toISODate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
@@ -26,7 +26,7 @@ export default function TimeFrame() {
   }
 
   function handleResetAll() {
-    clearSelection();
+    clearAll();
     clearDateRange();
     // Re-enable all airlines
     useMapStore.setState({ activeAirlines: new Set(["FR", "W6"]) });

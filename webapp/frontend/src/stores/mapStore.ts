@@ -1,29 +1,41 @@
 import { create } from "zustand";
 
 interface MapState {
-  selectedCities: Set<string>;
+  originCities: Set<string>;       // max 3
+  destinationCities: Set<string>;
   activeAirlines: Set<string>;
 
-  toggleCity: (iata: string) => void;
+  toggleOrigin: (iata: string) => void;
+  toggleDestination: (iata: string) => void;
   toggleAirline: (code: string) => void;
-  toggleCountry: (iataCodes: string[]) => void;
-  clearSelection: () => void;
-  setSelectedCities: (cities: string[]) => void;
+  clearAll: () => void;
 }
 
 export const useMapStore = create<MapState>((set) => ({
-  selectedCities: new Set<string>(),
+  originCities: new Set<string>(),
+  destinationCities: new Set<string>(),
   activeAirlines: new Set<string>(["FR", "W6"]),
 
-  toggleCity: (iata) =>
+  toggleOrigin: (iata) =>
     set((state) => {
-      const next = new Set(state.selectedCities);
+      const next = new Set(state.originCities);
+      if (next.has(iata)) {
+        next.delete(iata);
+      } else if (next.size < 3) {
+        next.add(iata);
+      }
+      return { originCities: next };
+    }),
+
+  toggleDestination: (iata) =>
+    set((state) => {
+      const next = new Set(state.destinationCities);
       if (next.has(iata)) {
         next.delete(iata);
       } else {
         next.add(iata);
       }
-      return { selectedCities: next };
+      return { destinationCities: next };
     }),
 
   toggleAirline: (code) =>
@@ -37,20 +49,9 @@ export const useMapStore = create<MapState>((set) => ({
       return { activeAirlines: next };
     }),
 
-  toggleCountry: (iataCodes) =>
-    set((state) => {
-      const next = new Set(state.selectedCities);
-      const allSelected = iataCodes.every((c) => next.has(c));
-      if (allSelected) {
-        iataCodes.forEach((c) => next.delete(c));
-      } else {
-        iataCodes.forEach((c) => next.add(c));
-      }
-      return { selectedCities: next };
+  clearAll: () =>
+    set({
+      originCities: new Set<string>(),
+      destinationCities: new Set<string>(),
     }),
-
-  clearSelection: () => set({ selectedCities: new Set<string>() }),
-
-  setSelectedCities: (cities) =>
-    set({ selectedCities: new Set<string>(cities) }),
 }));
