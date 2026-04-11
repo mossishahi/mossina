@@ -275,7 +275,7 @@ export default function Pathfinder() {
                 </div>
               )}
               <div className="pb-2">
-                <p className="text-[11px] text-[#484f58]">
+                <p className="text-xs text-[#484f58]">
                   {filtered.length} {label}s
                   {searchTimeMs != null && ` in ${(searchTimeMs / 1000).toFixed(1)}s`}
                 </p>
@@ -296,10 +296,10 @@ export default function Pathfinder() {
                         size={12}
                         className={`text-[#8b949e] transition-transform ${isOpen ? "rotate-90" : ""}`}
                       />
-                      <span className="text-xs font-semibold text-[#58a6ff]">
+                      <span className="text-sm font-semibold text-[#58a6ff]">
                         Length {n}
                       </span>
-                      <span className="text-[10px] text-[#484f58] bg-[#161b22] px-1.5 py-0.5 rounded-full">
+                      <span className="text-xs text-[#484f58] bg-[#161b22] px-1.5 py-0.5 rounded-full">
                         {hopFilteredPaths.length !== allPaths.length
                           ? `${hopFilteredPaths.length}/${allPaths.length}`
                           : `${allPaths.length}`}
@@ -474,7 +474,7 @@ function PathCard({
       <div className="flex items-center gap-2 w-max">
         <span
           onClick={handlePriceClick}
-          className="text-xs font-bold text-[#3fb950] tabular-nums hover:underline hover:text-[#56d364] cursor-pointer"
+          className="text-sm font-bold text-[#3fb950] tabular-nums hover:underline hover:text-[#56d364] cursor-pointer"
           title="Click to highlight cheapest dates"
         >
           {costLabel}
@@ -488,7 +488,7 @@ function PathCard({
           return (
             <span key={i} className="inline-flex items-center gap-0.5">
               <span
-                className="text-[10px] text-[#c9d1d9] font-medium whitespace-nowrap"
+                className="text-xs text-[#c9d1d9] font-medium whitespace-nowrap"
                 title={`${cityName(iata)} (${iata})`}
               >
                 {cityName(iata)}

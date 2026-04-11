@@ -105,15 +105,22 @@ export default function CityPicker({ selected, onToggle, airports, placeholder, 
   const dropdown = open && createPortal(
     <div
       ref={dropdownRef}
-      style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
+      style={{
+        position: "fixed",
+        top: pos.top,
+        left: pos.left,
+        width: pos.width,
+        zIndex: 9999,
+        maxHeight: "340px",
+      }}
       className="bg-[#161b22] border border-[#30363d] rounded-md shadow-xl overflow-y-auto"
     >
       {filtered.length === 0 ? (
-        <p className="text-[11px] text-[#484f58] text-center py-3">No cities found</p>
+        <p className="text-xs text-[#484f58] text-center py-4">No cities found</p>
       ) : (
         filtered.map((group) => (
           <div key={group.code}>
-            <div className="px-2 py-1 text-[9px] font-semibold text-[#484f58] uppercase tracking-wider sticky top-0 bg-[#161b22] border-b border-[#21262d]">
+            <div className="px-2 py-1.5 text-[10px] font-semibold text-[#484f58] uppercase tracking-wider sticky top-0 bg-[#161b22] border-b border-[#21262d]">
               {group.countryName}
             </div>
             {group.airports.map((a) => {
@@ -127,7 +134,7 @@ export default function CityPicker({ selected, onToggle, airports, placeholder, 
                     if (!disabled) { onToggle(a.iata); if (!isSel) setQuery(""); }
                   }}
                   disabled={disabled}
-                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors ${
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${
                     isSel
                       ? "bg-[#58a6ff]/10 text-[#58a6ff]"
                       : disabled
@@ -135,9 +142,9 @@ export default function CityPicker({ selected, onToggle, airports, placeholder, 
                       : "text-[#c9d1d9] hover:bg-[#21262d]"
                   }`}
                 >
-                  <span className="text-[10px] font-mono text-[#8b949e] w-7 shrink-0">{a.iata}</span>
-                  <span className="text-xs truncate">{a.city || a.name}</span>
-                  {isSel && <span className="ml-auto text-[10px] text-[#58a6ff]">✓</span>}
+                  <span className="text-xs font-mono text-[#8b949e] w-8 shrink-0">{a.iata}</span>
+                  <span className="text-sm truncate">{a.city || a.name}</span>
+                  {isSel && <span className="ml-auto text-xs text-[#58a6ff]">✓</span>}
                 </button>
               );
             })}
@@ -145,7 +152,7 @@ export default function CityPicker({ selected, onToggle, airports, placeholder, 
         ))
       )}
       {atMax && (
-        <p className="text-[10px] text-[#484f58] text-center py-1.5 border-t border-[#21262d]">
+        <p className="text-xs text-[#484f58] text-center py-2 border-t border-[#21262d]">
           Max {maxSelect} selected
         </p>
       )}
@@ -156,25 +163,25 @@ export default function CityPicker({ selected, onToggle, airports, placeholder, 
   return (
     <div ref={triggerRef} className="relative">
       <div
-        className="min-h-[32px] flex flex-wrap gap-1 px-2 py-1 bg-[#0d1117] border border-[#30363d] rounded-md cursor-text hover:border-[#484f58] transition-colors"
+        className="min-h-[38px] flex flex-wrap gap-1 px-2 py-1.5 bg-[#0d1117] border border-[#30363d] rounded-md cursor-text hover:border-[#484f58] transition-colors"
         onClick={openDropdown}
       >
         {[...selected].map((iata) => (
           <span
             key={iata}
-            className="inline-flex items-center gap-0.5 bg-[#1c2a3a] text-[#58a6ff] text-[10px] px-1.5 py-0.5 rounded"
+            className="inline-flex items-center gap-1 bg-[#1c2a3a] text-[#58a6ff] text-xs px-2 py-0.5 rounded"
           >
             {nameMap.get(iata) || iata}
             <button
               onMouseDown={(e) => { e.stopPropagation(); onToggle(iata); }}
               className="text-[#58a6ff]/60 hover:text-white ml-0.5"
             >
-              <X size={9} />
+              <X size={10} />
             </button>
           </span>
         ))}
         <input
-          className="flex-1 min-w-[60px] bg-transparent text-xs text-[#c9d1d9] placeholder-[#484f58] outline-none py-0.5"
+          className="flex-1 min-w-[80px] bg-transparent text-sm text-[#c9d1d9] placeholder-[#484f58] outline-none py-0.5"
           placeholder={selected.size === 0 ? placeholder : ""}
           value={query}
           onChange={(e) => { setQuery(e.target.value); openDropdown(); }}

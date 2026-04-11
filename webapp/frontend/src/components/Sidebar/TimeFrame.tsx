@@ -28,14 +28,13 @@ export default function TimeFrame() {
   function handleResetAll() {
     clearAll();
     clearDateRange();
-    // Re-enable all airlines
     useMapStore.setState({ activeAirlines: new Set(["FR", "W6"]) });
   }
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-2">
       <div className="relative flex-1">
-        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-[#484f58] pointer-events-none">
+        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-[#484f58] pointer-events-none">
           From
         </span>
         <input
@@ -44,11 +43,11 @@ export default function TimeFrame() {
           min={today}
           onChange={(e) => handleFromChange(e.target.value)}
           onClick={(e) => { try { (e.target as HTMLInputElement).showPicker(); } catch {} }}
-          className="w-full bg-[#0d1117] border border-[#30363d] rounded-md py-1.5 pl-10 pr-1 text-[11px] text-[#c9d1d9] focus:outline-none focus:border-[#58a6ff] transition-colors [color-scheme:dark] cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+          className="w-full bg-[#0d1117] border border-[#30363d] rounded-md py-2 pl-12 pr-2 text-xs text-[#c9d1d9] focus:outline-none focus:border-[#58a6ff] transition-colors [color-scheme:dark] cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
         />
       </div>
       <div className="relative flex-1">
-        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-[#484f58] pointer-events-none">
+        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-[#484f58] pointer-events-none">
           To
         </span>
         <input
@@ -57,15 +56,15 @@ export default function TimeFrame() {
           min={from}
           onChange={(e) => handleToChange(e.target.value)}
           onClick={(e) => { try { (e.target as HTMLInputElement).showPicker(); } catch {} }}
-          className="w-full bg-[#0d1117] border border-[#30363d] rounded-md py-1.5 pl-7 pr-1 text-[11px] text-[#c9d1d9] focus:outline-none focus:border-[#58a6ff] transition-colors [color-scheme:dark] cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+          className="w-full bg-[#0d1117] border border-[#30363d] rounded-md py-2 pl-8 pr-2 text-xs text-[#c9d1d9] focus:outline-none focus:border-[#58a6ff] transition-colors [color-scheme:dark] cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
         />
       </div>
       <button
         onClick={handleResetAll}
         title="Reset all filters"
-        className="shrink-0 p-1.5 rounded-md border border-[#30363d] text-[#8b949e] hover:text-[#e5534b] hover:border-[#e5534b]/40 transition-colors"
+        className="shrink-0 p-2 rounded-md border border-[#30363d] text-[#8b949e] hover:text-[#e5534b] hover:border-[#e5534b]/40 transition-colors"
       >
-        <RotateCcw size={12} />
+        <RotateCcw size={13} />
       </button>
     </div>
   );

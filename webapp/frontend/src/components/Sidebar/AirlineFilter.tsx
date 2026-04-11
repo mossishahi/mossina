@@ -28,7 +28,7 @@ export default function AirlineFilter() {
   airlineData?.forEach((a) => { lastScraped[a.code] = a.last_scraped; });
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-4">
       <span className="text-xs font-medium text-[#8b949e] uppercase tracking-wider shrink-0">
         Airlines
       </span>
@@ -39,16 +39,16 @@ export default function AirlineFilter() {
           ? `${meta.name} — last updated ${formatAgo(ls)}\n${new Date(ls).toLocaleString()}`
           : meta.name;
         return (
-          <label key={code} className="flex items-center gap-1.5 cursor-pointer select-none" title={tooltip}>
+          <label key={code} className="flex items-center gap-2 cursor-pointer select-none" title={tooltip}>
             <input
               type="checkbox"
               checked={active}
               onChange={() => toggleAirline(code)}
-              className="w-3 h-3 rounded"
+              className="w-3.5 h-3.5 rounded"
               style={{ accentColor: meta.color }}
             />
             <span
-              className="text-[11px] font-medium"
+              className="text-sm font-medium"
               style={{ color: active ? meta.color : "#484f58" }}
             >
               {meta.name}

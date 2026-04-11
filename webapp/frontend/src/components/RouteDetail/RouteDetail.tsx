@@ -25,9 +25,9 @@ export default function RouteDetail() {
   const tabLabel = activeTab === "cycles" ? "cycle" : "path";
 
   return (
-    <div className="w-[400px] shrink-0 overflow-y-auto space-y-2 pb-1 pr-1">
+    <div className="w-full space-y-2 pb-1">
       <div className="flex items-center justify-between px-1 mb-1">
-        <span className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">
+        <span className="text-sm font-semibold text-[#8b949e] uppercase tracking-wider">
           {selectedPaths.length} {tabLabel}{selectedPaths.length > 1 ? "s" : ""} selected
         </span>
         <button
@@ -118,9 +118,9 @@ function PathPanel({
             const color = leg ? AIRLINE_META[leg.airline]?.color || "#8b949e" : "#8b949e";
             return (
               <span key={i} className="inline-flex items-center gap-0.5">
-                <span className="text-[11px] text-[#c9d1d9] font-medium">{cityName(iata)}</span>
+                <span className="text-xs text-[#c9d1d9] font-medium">{cityName(iata)}</span>
                 {i < path.path.length - 1 && (
-                  <span className="text-[11px] font-bold" style={{ color }}>{"\u2192"}</span>
+                  <span className="text-xs font-bold" style={{ color }}>{"\u2192"}</span>
                 )}
               </span>
             );
@@ -248,18 +248,18 @@ function SegmentDrawer({
           className="w-1.5 h-1.5 rounded-full shrink-0"
           style={{ backgroundColor: color }}
         />
-        <span className="text-[11px] text-[#c9d1d9] flex-1">
+        <span className="text-xs text-[#c9d1d9] flex-1">
           {cityName(leg.origin)} <span className="font-bold" style={{ color }}>{"\u2192"}</span> {cityName(leg.destination)}
         </span>
         {selection && (
-          <span className="text-[10px] text-[#484f58]">
+          <span className="text-xs text-[#484f58]">
             {new Date(selection.date + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
           </span>
         )}
-        <span className="text-[10px] font-medium" style={{ color }}>
+        <span className="text-xs font-medium" style={{ color }}>
           {meta?.name || leg.airline}
         </span>
-        <span className={`text-[10px] font-semibold tabular-nums ${selection ? "text-[#3fb950]" : "text-[#8b949e]"}`}>
+        <span className={`text-xs font-semibold tabular-nums ${selection ? "text-[#3fb950]" : "text-[#8b949e]"}`}>
           {costDisplay}
         </span>
       </button>
@@ -267,18 +267,18 @@ function SegmentDrawer({
       {open && (
         <div className="px-3 pb-2">
           {index > 0 && minDate && (
-            <p className="text-[9px] text-[#484f58] mb-1">
+            <p className="text-xs text-[#484f58] mb-1.5">
               Showing flights from {new Date(minDate + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
             </p>
           )}
           {isLoading && (
-            <p className="text-[10px] text-[#484f58] py-2">Loading flights...</p>
+            <p className="text-xs text-[#484f58] py-2">Loading flights...</p>
           )}
           {!isLoading && fares.length === 0 && (
-            <p className="text-[10px] text-[#484f58] py-2">No flights found in this period</p>
+            <p className="text-xs text-[#484f58] py-2">No flights found in this period</p>
           )}
           {fares.length > 0 && (
-            <div className="space-y-0.5 max-h-48 overflow-y-auto">
+            <div className="space-y-0.5 max-h-52 overflow-y-auto">
               {fares.map((f, i) => {
                 const dt = new Date(f.departure_date + "T00:00:00");
                 const day = dt.toLocaleDateString("en-GB", { weekday: "short" });
@@ -292,15 +292,15 @@ function SegmentDrawer({
                   <div
                     key={i}
                     onClick={() => handleSelectFare(f.departure_date, eurVal)}
-                    className={`flex items-center gap-2 py-1 px-2 rounded text-[10px] group cursor-pointer transition-all ${
+                    className={`flex items-center gap-2 py-1.5 px-2 rounded text-xs group cursor-pointer transition-all ${
                       isSelected
                         ? "bg-[#58a6ff]/15 border border-[#58a6ff]/30"
                         : "hover:bg-[#0d1117] border border-transparent"
                     } ${isFlashing ? "best-fare-flash" : ""}`}
                   >
-                    <Check size={10} className={`shrink-0 ${isSelected ? "text-[#58a6ff]" : "text-transparent"}`} />
-                    <span className="text-[#484f58] w-6">{day}</span>
-                    <span className="text-[#c9d1d9] w-14">{dateLabel}</span>
+                    <Check size={11} className={`shrink-0 ${isSelected ? "text-[#58a6ff]" : "text-transparent"}`} />
+                    <span className="text-[#484f58] w-7">{day}</span>
+                    <span className="text-[#c9d1d9] w-16">{dateLabel}</span>
                     {f.departure_time && (
                       <span className="text-[#8b949e] tabular-nums">
                         {f.departure_time}
