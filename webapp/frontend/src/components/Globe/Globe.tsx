@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { MapContainer, TileLayer, CircleMarker, Polyline, Tooltip, useMap } from "react-leaflet";
 import { LatLngBounds } from "leaflet";
 import { useAirports } from "@/hooks/useAirports";
+import { useRoutes } from "@/hooks/useRoutes";
 import { useMapStore } from "@/stores/mapStore";
 import { usePathStore } from "@/stores/pathStore";
 import { useTabStore } from "@/stores/tabStore";
@@ -48,6 +49,7 @@ function BoundsController({
 
 export default function Globe({ onArcClick }: Props) {
   const { data: airports = [] } = useAirports();
+  const { data: routes = [] } = useRoutes();
   const originCities = useMapStore((s) => s.originCities);
   const destinationCities = useMapStore((s) => s.destinationCities);
   const activeTab = useTabStore((s) => s.activeTab);
@@ -64,7 +66,17 @@ export default function Globe({ onArcClick }: Props) {
     return m;
   }, [airports]);
 
-  // Lines only for selected paths — no route lines
+  // Airports with a direct flight from any selected origin
+  const reachableFromOrigins = useMemo(() => {
+    if (originCities.size === 0) return new Set<string>();
+    const reachable = new Set<string>();
+    routes.forEach((r) => {
+      if (originCities.has(r.origin)) reachable.add(r.destination);
+    });
+    return reachable;
+  }, [routes, originCities]);
+
+  // Lines only for selected paths — no route overview lines
   const pathLines = useMemo<LineDatum[]>(() => {
     if (selectedPaths.length === 0) return [];
     return selectedPaths.flatMap((p) =>
@@ -84,7 +96,8 @@ export default function Globe({ onArcClick }: Props) {
     );
   }, [selectedPaths, airportMap]);
 
-  const hasDestFilter = destinationCities.size > 0;
+  const hasOrigins = originCities.size > 0;
+  const hasDests = destinationCities.size > 0;
 
   return (
     <div className="w-full h-full">
@@ -121,17 +134,21 @@ export default function Globe({ onArcClick }: Props) {
         {airports.map((a) => {
           const isOrigin = originCities.has(a.iata);
           const isDest = destinationCities.has(a.iata);
-          const dimmed = hasDestFilter && !isOrigin && !isDest;
+          // When destinations are chosen: highlight selected dests + origins, dim rest
+          // When only origins chosen: highlight reachable airports, dim rest
+          const isReachable = !hasDests && reachableFromOrigins.has(a.iata);
+          const dimmed = hasOrigins && !isOrigin && !isDest && !isReachable;
 
           const color = isOrigin
             ? "#58a6ff"
-            : isDest
+            : isDest || isReachable
             ? "#3fb950"
             : dimmed
             ? "#2d333b"
             : "#484f58";
-          const radius = isOrigin || isDest ? 6 : dimmed ? 2 : 3;
-          const fillOpacity = dimmed ? 0.4 : 1;
+
+          const radius = isOrigin || isDest ? 6 : isReachable ? 5 : dimmed ? 2 : 3;
+          const fillOpacity = dimmed ? 0.35 : 1;
 
           return (
             <CircleMarker
@@ -145,6 +162,7 @@ export default function Globe({ onArcClick }: Props) {
                   <b>{a.iata}</b> {a.name}
                   {isOrigin && <span style={{ color: "#58a6ff" }}> · origin</span>}
                   {isDest && <span style={{ color: "#3fb950" }}> · destination</span>}
+                  {isReachable && <span style={{ color: "#3fb950" }}> · direct flight</span>}
                 </Tooltip>
               )}
             </CircleMarker>
