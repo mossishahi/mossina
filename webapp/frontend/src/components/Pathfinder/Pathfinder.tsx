@@ -170,6 +170,8 @@ export default function Pathfinder() {
       if (hasDays && lastSearchRef.current) {
         clearTimeout(repricingTimer.current);
         setRepricing(true);
+        const activeTabId = isCycle ? "cycles" : "paths";
+        clearPaths(activeTabId);
         const hopConstraints = next.map((h) => ({
           min_stay_days: h.minDays,
           max_stay_days: h.maxDays,
@@ -187,7 +189,7 @@ export default function Pathfinder() {
             {
               onSuccess: (data) => {
                 if (data?.results) {
-                  updateSelectedResults(data.results, isCycle ? "cycles" : "paths");
+                  updateSelectedResults(data.results, activeTabId);
                 }
               },
               onSettled: () => setRepricing(false),
@@ -198,7 +200,7 @@ export default function Pathfinder() {
 
       return { ...prev, [length]: next };
     });
-  }, [isCycle, maxHops]);
+  }, [isCycle, maxHops, clearPaths, updateSelectedResults, pathMutation, cycleMutation]);
 
   const updateLegFilter = useCallback((length: number, legIdx: number, val: LegFilterValue) => {
     setLegFilters((prev) => {
