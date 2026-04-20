@@ -92,7 +92,7 @@ def _worker(worker_id, my_tasks, scraped_at, write_q, counters_lock, counters):
             "outboundMonthOfDate": f"{year:04d}-{month:02d}-01",
             "market": "en-gb",
         }
-        data = api_get(url, params=params)
+        data = api_get(url, params=params, delay=0.1)
 
         with counters_lock:
             counters["done"] += 1

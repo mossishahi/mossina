@@ -98,6 +98,7 @@ export default function HopFilter({ index, isEndpoint, value, onChange }: Props)
             onAdd={(c) => onChange({ ...value, includeCities: [...value.includeCities, c] })}
             onRemove={(c) => onChange({ ...value, includeCities: value.includeCities.filter((x) => x !== c) })}
             onAddMany={(cs) => onChange({ ...value, includeCities: [...new Set([...value.includeCities, ...cs])] })}
+            onClear={() => onChange({ ...value, includeCities: [] })}
           />
           <TagInput
             placeholder="exclude"
@@ -106,6 +107,7 @@ export default function HopFilter({ index, isEndpoint, value, onChange }: Props)
             onAdd={(c) => onChange({ ...value, excludeCities: [...value.excludeCities, c] })}
             onRemove={(c) => onChange({ ...value, excludeCities: value.excludeCities.filter((x) => x !== c) })}
             onAddMany={(cs) => onChange({ ...value, excludeCities: [...new Set([...value.excludeCities, ...cs])] })}
+            onClear={() => onChange({ ...value, excludeCities: [] })}
           />
         </div>
       )}
@@ -159,11 +161,12 @@ function DayInput({ placeholder, value, onConfirm }: {
 
 
 function TagInput({
-  placeholder, tags, color, onAdd, onRemove, onAddMany,
+  placeholder, tags, color, onAdd, onRemove, onAddMany, onClear,
 }: {
   placeholder: string; tags: string[]; color: string;
   onAdd: (iata: string) => void; onRemove: (iata: string) => void;
   onAddMany?: (iatas: string[]) => void;
+  onClear?: () => void;
 }) {
   const [q, setQ] = useState("");
   const [focused, setFocused] = useState(false);
@@ -204,24 +207,43 @@ function TagInput({
     setQ("");
   }
 
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Backspace" && q === "" && tags.length > 0) {
+      e.preventDefault();
+      onRemove(tags[tags.length - 1]);
+    }
+  }
+
   return (
     <div className="relative">
-      <div className="flex items-center gap-0.5 bg-[#0d1117] border border-[#21262d] rounded px-1 py-[2px] overflow-x-auto no-scrollbar">
-        {tags.map((t) => (
-          <span key={t} className="shrink-0 inline-flex items-center gap-px px-1 rounded text-[8px] font-semibold" style={{ background: `${color}18`, color }}>
-            {t}
-            <button onClick={() => onRemove(t)} className="ml-0.5 text-[7px] opacity-70 hover:opacity-100">×</button>
-          </span>
-        ))}
-        <input
-          type="text"
-          placeholder={tags.length === 0 ? placeholder : ""}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => setFocused(false), 150)}
-          className="flex-1 min-w-[30px] bg-transparent text-[9px] text-[#c9d1d9] outline-none placeholder-[#484f58] py-px"
-        />
+      <div className="flex items-center gap-0.5 bg-[#0d1117] border border-[#21262d] rounded pl-1 pr-0.5 py-[2px]">
+        <div className="flex-1 flex items-center gap-0.5 overflow-x-auto no-scrollbar min-w-0">
+          {tags.map((t) => (
+            <span key={t} className="shrink-0 inline-flex items-center gap-px px-1 rounded text-[8px] font-semibold" style={{ background: `${color}18`, color }}>
+              {t}
+              <button onClick={() => onRemove(t)} className="ml-0.5 text-[7px] opacity-70 hover:opacity-100">×</button>
+            </span>
+          ))}
+          <input
+            type="text"
+            placeholder={tags.length === 0 ? placeholder : ""}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setTimeout(() => setFocused(false), 150)}
+            className="flex-1 min-w-[30px] bg-transparent text-[9px] text-[#c9d1d9] outline-none placeholder-[#484f58] py-px"
+          />
+        </div>
+        {tags.length > 0 && onClear && (
+          <button
+            onClick={onClear}
+            className="shrink-0 ml-0.5 text-[10px] text-[#484f58] hover:text-[#e5534b] leading-none px-0.5"
+            title="Clear all"
+          >
+            ×
+          </button>
+        )}
       </div>
       {hasResults && (
         <div className="absolute top-full left-0 right-0 mt-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-[110] max-h-40 overflow-y-auto">
