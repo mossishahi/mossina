@@ -1,15 +1,21 @@
-"""Scrape cheapest one-way Ryanair fares.
+"""Scrape Ryanair fares via the per-route cheapestPerDay endpoint.
 
-Multi-threaded: each worker handles a chunk of airports, writes results
-to a shared queue consumed by a single DB writer thread.
+The old per-airport oneWayFares endpoint was unreliable: it returned only
+a small subset of fares per airport and prices often diverged from the
+website. The cheapestPerDay endpoint, called per O-D route per month,
+returns prices that match the Ryanair website exactly.
+
+Multi-threaded: each worker handles a chunk of route-months, writes
+results to a shared queue consumed by a single DB writer thread.
 """
 
 import logging
 import queue
 import threading
 import time as _time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.config import api_get
@@ -19,11 +25,25 @@ log = logging.getLogger("scraper")
 
 AIRLINE = "FR"
 DEFAULT_WORKERS = 8
+DEFAULT_MONTHS = 6
 _SENTINEL = None
 
 SERVICES_URL = "https://services-api.ryanair.com"
-FARES_URL = SERVICES_URL + "/farfnd/v4/oneWayFares"
-FARES_FALLBACK_URL = SERVICES_URL + "/farfnd/3/oneWayFares"
+CHEAPEST_PER_DAY_URL = SERVICES_URL + "/farfnd/3/oneWayFares/{origin}/{dest}/cheapestPerDay"
+
+
+def _month_starts(num_months):
+    """Return list of (year, month) tuples for the next num_months, starting now."""
+    today = date.today()
+    out = []
+    y, m = today.year, today.month
+    for _ in range(num_months):
+        out.append((y, m))
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return out
 
 
 def _db_writer(write_q, counters):
@@ -64,54 +84,50 @@ def _db_writer(write_q, counters):
         session.close()
 
 
-def _worker(worker_id, my_airports, date_from, date_to, scraped_at, write_q,
-            counters_lock, counters):
-    """Worker thread: fetches fares for its airports, pushes to queue."""
-    for origin in my_airports:
+def _worker(worker_id, my_tasks, scraped_at, write_q, counters_lock, counters):
+    """Worker thread: fetches cheapestPerDay for each (origin, dest, month)."""
+    for origin, dest, year, month in my_tasks:
+        url = CHEAPEST_PER_DAY_URL.format(origin=origin, dest=dest)
         params = {
-            "departureAirportIataCode": origin,
-            "language": "en",
+            "outboundMonthOfDate": f"{year:04d}-{month:02d}-01",
             "market": "en-gb",
-            "offset": 0,
-            "limit": 200,
-            "outboundDepartureDateFrom": date_from,
-            "outboundDepartureDateTo": date_to,
-            "priceValueTo": 1000,
         }
-        data = api_get(FARES_URL, params=params)
-        if not data or not data.get("fares"):
-            data = api_get(FARES_FALLBACK_URL, params=params)
+        data = api_get(url, params=params)
+
+        with counters_lock:
+            counters["done"] += 1
+
         if not data:
-            with counters_lock:
-                counters["done"] += 1
             continue
 
+        fares = (data.get("outbound") or {}).get("fares") or []
         batch = []
-        for fare in data.get("fares", []):
-            outbound = fare.get("outbound", {})
-            dep_str = outbound.get("departureDate", "").split(".")[0]
-            arr_str = outbound.get("arrivalDate", "").split(".")[0]
-            fn = outbound.get("flightNumber", "").replace(" ", "")
-            dest_code = outbound.get("arrivalAirport", {}).get("iataCode", "")
-            price_info = outbound.get("price", {})
+        for f in fares:
+            day_str = f.get("day")
+            if not day_str:
+                continue
+            if f.get("unavailable") or f.get("soldOut"):
+                continue
+            price_info = f.get("price") or {}
             price = price_info.get("value")
+            if price is None:
+                continue
             currency = price_info.get("currencyCode", "EUR")
 
-            if not dest_code or price is None:
+            try:
+                dep_date = date.fromisoformat(day_str)
+            except ValueError:
                 continue
-
-            dep_date = datetime.fromisoformat(dep_str).date() if dep_str else None
-            arr_date = datetime.fromisoformat(arr_str).date() if arr_str else None
 
             batch.append({
                 "origin": origin,
-                "destination": dest_code,
+                "destination": dest,
                 "airline": AIRLINE,
                 "departure_date": dep_date,
-                "arrival_date": arr_date,
+                "arrival_date": None,
                 "price": price,
                 "currency": currency,
-                "flight_number": fn,
+                "flight_number": "FR",
                 "scraped_at": scraped_at,
             })
 
@@ -119,51 +135,68 @@ def _worker(worker_id, my_airports, date_from, date_to, scraped_at, write_q,
             write_q.put(batch)
 
         with counters_lock:
-            counters["done"] += 1
             done = counters["done"]
-            total_airports = counters["airports"]
+            total_tasks = counters["tasks"]
             total_fares = counters["total"]
-            if done % 20 == 0 or done == total_airports:
+            if done % 200 == 0 or done == total_tasks:
                 elapsed = _time.monotonic() - counters["t0"]
                 rate = done / (elapsed / 60) if elapsed > 0 else 0
-                remaining = total_airports - done
+                remaining = total_tasks - done
                 eta = remaining / rate if rate > 0 else 0
                 log.info(
-                    "[%s]   %d/%d airports  %d fares  %.0f airports/min  ETA %.1fm",
-                    AIRLINE, done, total_airports, total_fares, rate, eta,
+                    "[%s]   %d/%d route-months  %d fares  %.0f/min  ETA %.1fm",
+                    AIRLINE, done, total_tasks, total_fares, rate, eta,
                 )
 
 
-def scrape_fares(session, airports, limit=None, workers=DEFAULT_WORKERS, **_kw):
-    """Fetch cheapest one-way fares from each airport for the next ~6 months."""
+def scrape_fares(session, airports=None, limit=None, workers=DEFAULT_WORKERS,
+                 months=DEFAULT_MONTHS, **_kw):
+    """Fetch cheapest fares for every route for the next ~6 months.
+
+    Uses cheapestPerDay endpoint per-route. `airports` arg is accepted
+    for API compatibility with other airlines but is not used: routes
+    come directly from the database.
+    """
     now = datetime.now(timezone.utc)
-    date_from = now.strftime("%Y-%m-%d")
-    date_to = (now + timedelta(days=180)).strftime("%Y-%m-%d")
     scraped_at = now
 
+    routes = session.execute(
+        text("SELECT origin, destination FROM routes WHERE airline = :a"),
+        {"a": AIRLINE},
+    ).fetchall()
+
     if limit:
-        airports = airports[:limit]
+        routes = routes[:limit]
 
-    n_workers = min(workers, len(airports))
+    month_list = _month_starts(months)
+    tasks = [(o, d, y, m) for (o, d) in routes for (y, m) in month_list]
 
-    log.info("[%s] Fetching fares for %d airports (%s to %s), %d workers ...",
-             AIRLINE, len(airports), date_from, date_to, n_workers)
+    if not tasks:
+        log.warning("[%s] No routes found — skipping fares scrape.", AIRLINE)
+        return
+
+    n_workers = min(workers, len(tasks))
+
+    log.info(
+        "[%s] Fetching cheapestPerDay for %d routes x %d months = %d calls, %d workers ...",
+        AIRLINE, len(routes), len(month_list), len(tasks), n_workers,
+    )
 
     write_q = queue.Queue(maxsize=200)
     counters_lock = threading.Lock()
-    counters = {"done": 0, "total": 0, "airports": len(airports),
+    counters = {"done": 0, "total": 0, "tasks": len(tasks),
                 "t0": _time.monotonic()}
 
     writer = threading.Thread(target=_db_writer, args=(write_q, counters),
                               daemon=True)
     writer.start()
 
-    chunks = [airports[i::n_workers] for i in range(n_workers)]
+    chunks = [tasks[i::n_workers] for i in range(n_workers)]
     threads = []
     for i in range(n_workers):
         t = threading.Thread(
             target=_worker,
-            args=(i, chunks[i], date_from, date_to, scraped_at, write_q,
+            args=(i, chunks[i], scraped_at, write_q,
                   counters_lock, counters),
         )
         t.start()
