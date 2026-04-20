@@ -81,6 +81,29 @@ def snapshot_routes(session, airline_code, log):
     return count
 
 
+def purge_stale_fares(session, airline_code, log):
+    """Delete fares that were NOT updated in the latest scrape.
+
+    After a full refresh (-r 0), any fare with an older scraped_at was not
+    returned by the API and is likely cancelled. Only deletes future fares.
+    """
+    result = session.execute(text("""
+        DELETE FROM fares
+        WHERE airline = :airline
+          AND departure_date >= current_date
+          AND scraped_at < (
+              SELECT MAX(scraped_at) FROM fares WHERE airline = :airline
+          )
+    """), {"airline": airline_code})
+    session.commit()
+    count = result.rowcount
+    if count > 0:
+        log.info("[%s] Purged %d stale fares (no longer on airline website).", airline_code, count)
+    else:
+        log.info("[%s] No stale fares to purge.", airline_code)
+    return count
+
+
 def run_scrape(args, log):
     """Run a single scrape pass for the configured airlines.
 
@@ -126,6 +149,10 @@ def run_scrape(args, log):
                     days_fresh=args.refresh_days,
                     workers=args.workers,
                 )
+
+            if args.refresh_days == 0 and not args.limit:
+                log.info("Cleaning stale %s fares ...", code)
+                purge_stale_fares(session, code, log)
 
             log.info("Recording %s route availability ...", code)
             snapshot_routes(session, code, log)
