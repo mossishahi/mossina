@@ -214,12 +214,17 @@ export default function Pathfinder() {
   function applyHopFilters(paths: PathResult[], length: number): PathResult[] {
     const hops = getHopFiltersForLength(length);
     const legs = getLegFiltersForLength(length);
+    const globalExclude = new Set<string>();
+    hops.forEach((f) => {
+      if (f) f.excludeCities.forEach((c) => globalExclude.add(c));
+    });
     return paths.filter((p) => {
       for (let i = 0; i < p.path.length; i++) {
+        const city = p.path[i];
+        if (globalExclude.has(city)) return false;
         const f = hops[i];
         if (!f) continue;
-        if (f.includeCities.length > 0 && !f.includeCities.includes(p.path[i])) return false;
-        if (f.excludeCities.includes(p.path[i])) return false;
+        if (f.includeCities.length > 0 && !f.includeCities.includes(city)) return false;
       }
       for (let i = 0; i < p.legs.length; i++) {
         const lf = legs[i];
