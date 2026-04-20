@@ -87,6 +87,7 @@ function PathPanel({
   const cityName = (iata: string) => nameMap.get(iata) || iata;
 
   const selectedTotal = useMemo(() => {
+    if (selections.length === 0) return null;
     let sum = 0;
     let allPicked = true;
     selections.forEach((s) => {
