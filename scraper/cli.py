@@ -109,6 +109,8 @@ def run_scrape(args, log):
 
     Returns True if data was scraped successfully, False otherwise.
     """
+    from datetime import datetime, timezone
+    run_started_at = datetime.now(timezone.utc)
     session = SessionLocal()
     success = False
     try:
@@ -158,8 +160,8 @@ def run_scrape(args, log):
             snapshot_routes(session, code, log)
 
             fare_count = session.execute(
-                text("SELECT COUNT(*) FROM fares WHERE airline = :a AND scraped_at > now() - interval '2 hours'"),
-                {"a": code},
+                text("SELECT COUNT(*) FROM fares WHERE airline = :a AND scraped_at >= :since"),
+                {"a": code, "since": run_started_at},
             ).scalar() or 0
 
             if fare_count == 0:
