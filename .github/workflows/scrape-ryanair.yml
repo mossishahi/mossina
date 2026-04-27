@@ -1,13 +1,13 @@
-name: Scrape Wizz Air
+name: Scrape Ryanair
 
 on:
   schedule:
-    - cron: '0 1 * * *'   # 03:00 Berlin (01:00 UTC)
+    - cron: '0 21 * * *'   # 23:00 Berlin (21:00 UTC)
   workflow_dispatch:
 
 jobs:
   scrape:
-    name: Run Wizz Air scraper
+    name: Run Ryanair scraper
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
@@ -22,7 +22,7 @@ jobs:
           script: |
             set -e
             cd ~/mossina-dev
-            docker compose run --rm scraper python cli.py --airline W6 -r 0 -w 5
+            docker compose run --rm scraper python cli.py --airline FR -r 0
 
       - name: Notify Telegram on failure
         if: failure()
@@ -30,7 +30,7 @@ jobs:
           curl -sS -X POST \
             "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -H "Content-Type: application/json" \
-            -d '{"chat_id":"${{ secrets.TELEGRAM_CHAT_ID }}","text":"❌ Wizz Air scrape FAILED — check GitHub Actions"}'
+            -d '{"chat_id":"${{ secrets.TELEGRAM_CHAT_ID }}","text":"❌ Ryanair scrape FAILED — check GitHub Actions"}'
 
       - name: Notify Telegram on success
         if: success()
@@ -38,4 +38,4 @@ jobs:
           curl -sS -X POST \
             "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -H "Content-Type: application/json" \
-            -d '{"chat_id":"${{ secrets.TELEGRAM_CHAT_ID }}","text":"✅ Wizz Air scrape completed"}'
+            -d '{"chat_id":"${{ secrets.TELEGRAM_CHAT_ID }}","text":"✅ Ryanair scrape completed"}'
