@@ -2,6 +2,7 @@
 
 import logging
 import os
+import random
 import time
 
 import requests
@@ -18,7 +19,7 @@ WIZZAIR_API_URL = os.getenv("WIZZAIR_API_URL", "")
 SCRAPFLY_API_KEY = os.getenv("SCRAPFLY_API_KEY", "")
 
 REQUEST_DELAY = 1.5
-MAX_RETRIES = 3
+MAX_RETRIES = 5
 RETRY_BACKOFF = 5
 
 HEADERS = {
@@ -47,16 +48,27 @@ def setup_logging(level=logging.INFO):
 
 
 def api_get(url, params=None, delay=None):
-    """GET JSON with retries and rate-limit back-off."""
+    """GET JSON with retries and rate-limit back-off.
+
+    Treats 403/429 as rate-limit responses with exponential backoff plus
+    jitter, since bursts of either status code from Ryanair indicate a
+    sliding window that lasts longer than a few seconds.
+    """
+    base_delay = delay if delay is not None else REQUEST_DELAY
+    if base_delay > 0:
+        time.sleep(base_delay + random.uniform(0, base_delay * 0.3))
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            time.sleep(delay if delay is not None else REQUEST_DELAY)
-            resp = _http_session.get(url, params=params, timeout=10)
+            resp = _http_session.get(url, params=params, timeout=15)
             if resp.status_code == 200:
                 return resp.json()
-            if resp.status_code == 429:
-                wait = RETRY_BACKOFF * attempt
-                _log.warning("Rate limited (429). Waiting %ds ...", wait)
+            if resp.status_code in (403, 429):
+                wait = min(60, RETRY_BACKOFF * (2 ** (attempt - 1)))
+                wait += random.uniform(0, wait * 0.3)
+                _log.warning(
+                    "Rate limited (%d). Waiting %.1fs (attempt %d) ...",
+                    resp.status_code, wait, attempt,
+                )
                 time.sleep(wait)
                 continue
             if resp.status_code == 404:
@@ -67,6 +79,7 @@ def api_get(url, params=None, delay=None):
         except requests.RequestException as exc:
             _log.warning("Request error: %s (attempt %d)", exc, attempt)
         if attempt < MAX_RETRIES:
-            time.sleep(RETRY_BACKOFF * attempt)
+            wait = min(30, RETRY_BACKOFF * attempt)
+            time.sleep(wait + random.uniform(0, wait * 0.3))
     _log.error("Failed after %d attempts: %s", MAX_RETRIES, url)
     return None
