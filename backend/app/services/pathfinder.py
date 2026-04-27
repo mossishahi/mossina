@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from sqlalchemy import func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.fare import Fare
+from mossina_db.models import Fare
 from app.schemas.search import (
     CycleSearchRequest,
     HopConstraint,

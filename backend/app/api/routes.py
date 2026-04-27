@@ -6,8 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.airlines import AIRLINE_META
 from app.database import get_db
-from app.models import Route
-from app.models.fare import Fare
+from mossina_db.models import Fare, Route
 from app.schemas.route import RouteOut
 
 router = APIRouter(prefix="/routes", tags=["routes"])

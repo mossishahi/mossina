@@ -6,7 +6,7 @@ from sqlalchemy import func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Fare, Route
+from mossina_db.models import Fare, Route
 
 router = APIRouter(prefix="/airlines", tags=["airlines"])
 

@@ -6,8 +6,7 @@ from datetime import date
 from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.fare import Fare
-from app.models.route import Route
+from mossina_db.models import Fare, Route
 
 
 def _normalize_date_range(

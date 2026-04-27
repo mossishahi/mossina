@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.database import get_db
-from app.models import Airport, Country, Route
+from mossina_db.models import Airport, Country, Route
 from app.schemas.airport import AirportOut, AirportSearchResult, CountryOut
 
 router = APIRouter(prefix="/airports", tags=["airports"])

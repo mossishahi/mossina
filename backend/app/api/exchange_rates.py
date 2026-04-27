@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import ExchangeRate
+from mossina_db.models import ExchangeRate
 
 router = APIRouter(prefix="/exchange-rates", tags=["exchange-rates"])
 

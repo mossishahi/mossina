@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import ExchangeRate, Fare, Schedule
+from mossina_db.models import ExchangeRate, Fare, Schedule
 from app.schemas.fare import FareOut, RouteFaresOut
 
 router = APIRouter(prefix="/fares", tags=["fares"])

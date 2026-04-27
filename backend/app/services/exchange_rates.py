@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.exchange_rate import ExchangeRate
+from mossina_db.models import ExchangeRate
 
 ER_API_URL = "https://open.er-api.com/v6/latest/EUR"
 
