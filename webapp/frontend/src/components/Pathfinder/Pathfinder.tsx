@@ -164,10 +164,13 @@ export default function Pathfinder() {
     setHopFilters((prev) => {
       const current = prev[length] || Array.from({ length: length + 1 }, () => emptyHop());
       const next = [...current];
+      const prevAtIdx = current[stopIdx] || emptyHop();
       next[stopIdx] = val;
 
+      const daysChanged =
+        prevAtIdx.minDays !== val.minDays || prevAtIdx.maxDays !== val.maxDays;
       const hasDays = next.some((h) => h.minDays != null || h.maxDays != null);
-      if (hasDays && lastSearchRef.current) {
+      if (daysChanged && hasDays && lastSearchRef.current) {
         clearTimeout(repricingTimer.current);
         setRepricing(true);
         const activeTabId = isCycle ? "cycles" : "paths";
