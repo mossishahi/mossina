@@ -42,7 +42,7 @@ export default function Pathfinder() {
 
   const pathMutation = useSearchPaths();
   const cycleMutation = useSearchCycles();
-  const lastSearchRef = useRef<{ from: string; to: string; cities: string[]; airline?: string } | null>(null);
+  const lastSearchRef = useRef<{ from: string; to: string; cities: string[]; airline?: string; strict: boolean } | null>(null);
 
   const prevCitiesRef = useRef(selectedCities);
   useEffect(() => {
@@ -59,7 +59,7 @@ export default function Pathfinder() {
     }
   }, [selectedCities]);
 
-  function handleSearchBoth() {
+  function handleSearchBoth(strict: boolean = onlySelected) {
     const cities = [...selectedCities];
     if (cities.length === 0) return;
 
@@ -78,15 +78,15 @@ export default function Pathfinder() {
     setSearchActive(true);
 
     const al = activeAirlines.size === 1 ? [...activeAirlines][0] : undefined;
-    lastSearchRef.current = { from, to, cities, airline: al };
+    lastSearchRef.current = { from, to, cities, airline: al, strict };
 
     pathMutation.mutate({
       origins: cities,
-      destinations: cities,
+      destinations: strict ? cities : null,
       max_hops: maxHops,
       date_from: from,
       date_to: to,
-      only_selected: false,
+      only_selected: strict,
       airline: al,
     });
 
@@ -95,7 +95,7 @@ export default function Pathfinder() {
       max_hops: maxHops,
       date_from: from,
       date_to: to,
-      only_selected: false,
+      only_selected: strict,
     });
   }
 
@@ -108,10 +108,7 @@ export default function Pathfinder() {
   const pathCount = pathMutation.data?.results?.length ?? 0;
   const cycleCount = cycleMutation.data?.results?.length ?? 0;
 
-  const filtered = useMemo(() => {
-    if (!onlySelected || selectedCities.size === 0) return results;
-    return results.filter((p) => p.path.every((iata) => selectedCities.has(iata)));
-  }, [results, onlySelected, selectedCities]);
+  const filtered = results;
 
   const grouped = useMemo(() => {
     const g: Record<number, PathResult[]> = {};
@@ -185,8 +182,8 @@ export default function Pathfinder() {
           const s = lastSearchRef.current!;
           const mutation = isCycle ? cycleMutation : pathMutation;
           const base = isCycle
-            ? { origins: s.cities, max_hops: maxHops, date_from: s.from, date_to: s.to, only_selected: false }
-            : { origins: s.cities, destinations: s.cities, max_hops: maxHops, date_from: s.from, date_to: s.to, only_selected: false, airline: s.airline };
+            ? { origins: s.cities, max_hops: maxHops, date_from: s.from, date_to: s.to, only_selected: s.strict }
+            : { origins: s.cities, destinations: s.strict ? s.cities : null, max_hops: maxHops, date_from: s.from, date_to: s.to, only_selected: s.strict, airline: s.airline };
           mutation.mutate(
             { ...base, hop_filters: hopConstraints } as any,
             {
@@ -282,18 +279,18 @@ export default function Pathfinder() {
               )}
               <div className="pb-2 space-y-1.5">
                 <p className="text-[11px] text-[#484f58]">
-                  {filtered.length}
-                  {onlySelected && filtered.length !== results.length
-                    ? ` of ${results.length}`
-                    : ""}{" "}
-                  {label}s
+                  {filtered.length} {label}s
                   {searchTimeMs != null && ` in ${(searchTimeMs / 1000).toFixed(1)}s`}
                 </p>
-                <label className="flex items-center gap-2 cursor-pointer select-none">
+                <label className="flex items-center gap-2 cursor-pointer select-none" title="When checked, every stop must be in the selected cities. When unchecked, paths may end (or pass through) any city.">
                   <input
                     type="checkbox"
                     checked={onlySelected}
-                    onChange={(e) => setOnlySelected(e.target.checked)}
+                    onChange={(e) => {
+                      const v = e.target.checked;
+                      setOnlySelected(v);
+                      if (lastSearchRef.current) handleSearchBoth(v);
+                    }}
                     className="accent-[#58a6ff] w-3 h-3 rounded"
                   />
                   <span className="text-[11px] text-[#8b949e]">

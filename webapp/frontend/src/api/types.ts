@@ -82,7 +82,7 @@ export interface LegConstraint {
 
 export interface PathSearchRequest {
   origins: string[];
-  destinations: string[];
+  destinations: string[] | null;
   max_hops: number;
   date_from: string;
   date_to: string;
