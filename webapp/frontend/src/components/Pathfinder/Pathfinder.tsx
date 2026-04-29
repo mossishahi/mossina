@@ -242,7 +242,7 @@ export default function Pathfinder() {
       <SearchControls
         maxHops={maxHops}
         setMaxHops={setMaxHops}
-        onSearch={handleSearchBoth}
+        onSearch={() => handleSearchBoth()}
         pathPending={pathMutation.isPending}
         cyclePending={cycleMutation.isPending}
         pathDone={pathMutation.isSuccess}
