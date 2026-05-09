@@ -3,7 +3,7 @@ name: Deploy to DigitalOcean
 on:
   push:
     branches:
-      - production
+      - master
 
 jobs:
   deploy:
@@ -33,10 +33,10 @@ jobs:
             echo "==> Syncing repo..."
             if [ -d "$REPO_DIR/.git" ]; then
               git -C "$REPO_DIR" fetch origin
-              git -C "$REPO_DIR" checkout production 2>/dev/null || git -C "$REPO_DIR" checkout -b production origin/production
-              git -C "$REPO_DIR" reset --hard origin/production
+              git -C "$REPO_DIR" checkout master 2>/dev/null || git -C "$REPO_DIR" checkout -b master origin/master
+              git -C "$REPO_DIR" reset --hard origin/master
             else
-              git clone -b production "$REPO_URL" "$REPO_DIR"
+              git clone -b master "$REPO_URL" "$REPO_DIR"
             fi
 
             echo "==> Updating .env..."
