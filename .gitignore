@@ -27,3 +27,7 @@ node_modules/
 
 # Local plans
 claude-plans/
+
+# Local docker-compose customizations (e.g. host port mapping)
+docker-compose.override.yml
+docker-compose.override.yaml

@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant light (&:where([data-theme="light"] *, [data-theme="light"]));
+
 @theme {
   --color-dark-bg: #0d1117;
   --color-dark-panel: #161b22;
@@ -20,6 +22,55 @@ body {
   font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   overflow: hidden;
 }
+
+/* ----- Light theme overrides -----
+ * Re-maps the most common dark-palette hex codes (used heavily across
+ * components) to GitHub-light equivalents when [data-theme="light"]
+ * is set on <html>. Avoids touching every component file individually.
+ * Tailwind generates classes like `.text-\[\#c9d1d9\]` for arbitrary
+ * hex values - we escape `[`, `]`, `#` to match those generated names.
+ */
+[data-theme="light"] body {
+  background-color: #ffffff;
+  color: #1f2328;
+}
+
+/* Text colors */
+[data-theme="light"] .text-white { color: #1f2328; }
+[data-theme="light"] .text-\[\#c9d1d9\] { color: #1f2328; }
+[data-theme="light"] .text-\[\#8b949e\] { color: #57606a; }
+[data-theme="light"] .text-\[\#484f58\] { color: #6e7781; }
+[data-theme="light"] .placeholder-\[\#484f58\]::placeholder { color: #8c959f; }
+
+/* Borders */
+[data-theme="light"] .border-\[\#30363d\] { border-color: #d0d7de; }
+[data-theme="light"] .border-\[\#21262d\] { border-color: #d8dee4; }
+[data-theme="light"] .border-b-\[\#30363d\] { border-bottom-color: #d0d7de; }
+[data-theme="light"] .border-t-\[\#21262d\] { border-top-color: #d8dee4; }
+
+/* Solid surface backgrounds */
+[data-theme="light"] .bg-\[\#0d1117\] { background-color: #ffffff; }
+[data-theme="light"] .bg-\[\#0d1117\]\/50 { background-color: rgba(246, 248, 250, 0.5); }
+[data-theme="light"] .bg-\[\#161b22\] { background-color: #f6f8fa; }
+[data-theme="light"] .bg-\[\#21262d\] { background-color: #eaeef2; }
+
+/* Translucent panel backgrounds */
+[data-theme="light"] .bg-black\/80 { background-color: rgba(255, 255, 255, 0.85); }
+[data-theme="light"] .bg-black\/85 { background-color: rgba(255, 255, 255, 0.88); }
+[data-theme="light"] .bg-black\/60 { background-color: rgba(15, 20, 25, 0.4); }
+
+/* Hover states for lists / rows */
+[data-theme="light"] .hover\:bg-\[\#161b22\]:hover { background-color: #f6f8fa; }
+[data-theme="light"] .hover\:bg-\[\#161b22\]\/60:hover { background-color: rgba(246, 248, 250, 0.7); }
+[data-theme="light"] .hover\:bg-\[\#0d1117\]:hover { background-color: #f6f8fa; }
+[data-theme="light"] .hover\:bg-\[\#21262d\]:hover { background-color: #eaeef2; }
+[data-theme="light"] .hover\:bg-\[\#30363d\]\/50:hover { background-color: rgba(208, 215, 222, 0.5); }
+
+/* Scrollbar */
+[data-theme="light"] ::-webkit-scrollbar-track { background: #f6f8fa; }
+[data-theme="light"] ::-webkit-scrollbar-thumb { background: #d0d7de; }
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: #afb8c1; }
+[data-theme="light"] * { scrollbar-color: #d0d7de #f6f8fa; }
 
 #root {
   width: 100vw;
