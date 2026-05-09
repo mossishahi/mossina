@@ -1,149 +1,113 @@
-export interface PaginationMeta {
-  page: number;
-  per_page: number;
-  total: number;
-  total_pages: number;
-}
-
 export interface Airport {
-  iata_code: string;
+  iata: string;
   name: string;
-  city: string | null;
-  country_code: string | null;
-  country_name: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  timezone: string | null;
-}
-
-export interface AirportListResponse {
-  airports: Airport[];
-  meta?: PaginationMeta;
-}
-
-export interface ConnectedRoute {
-  destination: Airport;
-  airline: string;
-  has_fares: boolean;
-  min_price: number | null;
-  currency: string | null;
-}
-
-export interface AirportDetail {
-  airport: Airport;
-  outbound_routes: ConnectedRoute[];
-  inbound_route_count: number;
-}
-
-export interface AirportSearchResult {
-  iata_code: string;
-  name: string;
-  city: string | null;
-  country_code: string | null;
-  country_name: string | null;
-  match_field: string;
+  city: string;
+  country: string;
+  country_code: string;
+  lat: number;
+  lon: number;
+  airlines: string[];
 }
 
 export interface Country {
   code: string;
   name: string;
-  currency: string | null;
-}
-
-export interface CountryListResponse {
-  countries: Country[];
-}
-
-export interface Airline {
-  code: string;
-  name: string;
-}
-
-export interface AirlineListResponse {
-  airlines: Airline[];
+  airports: Airport[];
 }
 
 export interface Route {
-  id: number;
   origin: string;
-  origin_name: string | null;
-  origin_city: string | null;
-  origin_country: string | null;
   destination: string;
-  destination_name: string | null;
-  destination_city: string | null;
-  destination_country: string | null;
   airline: string;
-  is_connecting: boolean;
-  new_route: boolean;
-  seasonal_route: boolean;
-  last_seen: string | null;
-  min_price: number | null;
-  currency: string | null;
-}
-
-export interface RouteListResponse {
-  routes: Route[];
-  meta: PaginationMeta;
+  origin_name?: string;
+  destination_name?: string;
 }
 
 export interface Fare {
-  id: number;
-  origin: string;
-  origin_name: string | null;
-  destination: string;
-  destination_name: string | null;
+  departure_date: string;
+  price: number;
+  currency: string;
+  price_eur: number | null;
   airline: string;
-  departure_date: string | null;
-  arrival_date: string | null;
-  price: number | null;
-  currency: string | null;
   flight_number: string | null;
-  scraped_at: string | null;
+  departure_time: string | null;
+  arrival_time: string | null;
 }
 
-export interface FareListResponse {
-  fares: Fare[];
-  meta: PaginationMeta;
-}
-
-export interface GraphNode {
-  iata_code: string;
-  name: string;
-  city: string | null;
-  country_code: string | null;
-  country_name: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  route_count: number;
-}
-
-export interface GraphEdge {
+export interface RouteFares {
   origin: string;
   destination: string;
   airline: string;
-  min_price: number | null;
-  currency: string | null;
+  fares: Fare[];
 }
 
-export interface GraphResponse {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
-
-export interface TableCount {
-  table: string;
-  count: number;
-}
-
-export interface AirlineStat {
+export interface PathLeg {
+  origin: string;
+  destination: string;
   airline: string;
-  route_count: number;
+  cost_eur: number | null;
+  best_date: string | null;
 }
 
-export interface StatsResponse {
-  tables: TableCount[];
-  airlines: AirlineStat[];
-  last_updated: string | null;
-  db_size_mb: number;
+export interface PathResult {
+  path: string[];
+  legs: PathLeg[];
+  total_cost_eur: number | null;
+  is_partial: boolean;
 }
+
+export interface SearchResponse {
+  results: PathResult[];
+  count: number;
+  search_time_ms: number;
+}
+
+export interface AirlineInfo {
+  code: string;
+  name: string;
+  color: string;
+  last_scraped: string | null;
+}
+
+export interface HopConstraint {
+  min_stay_days?: number | null;
+  max_stay_days?: number | null;
+  include_cities?: string[] | null;
+  exclude_cities?: string[] | null;
+}
+
+export interface LegConstraint {
+  airline?: string | null;
+}
+
+export interface PathSearchRequest {
+  origins: string[];
+  destinations: string[];
+  max_hops: number;
+  date_from: string;
+  date_to: string;
+  only_selected?: boolean;
+  airline?: string;
+  hop_filters?: HopConstraint[] | null;
+  leg_filters?: LegConstraint[] | null;
+}
+
+export interface CycleSearchRequest {
+  origins: string[];
+  max_hops: number;
+  date_from: string;
+  date_to: string;
+  only_selected?: boolean;
+  hop_filters?: HopConstraint[] | null;
+  leg_filters?: LegConstraint[] | null;
+}
+
+export interface ExchangeRate {
+  currency: string;
+  rate: number;
+}
+
+export const AIRLINE_META: Record<string, { name: string; color: string }> = {
+  FR: { name: "Ryanair", color: "#0b4ea2" },
+  W6: { name: "Wizz Air", color: "#e500a4" },
+};

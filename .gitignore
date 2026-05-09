@@ -24,3 +24,6 @@ build/
 
 # Node
 node_modules/
+
+# Local plans
+claude-plans/

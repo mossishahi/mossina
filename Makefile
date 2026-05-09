@@ -7,19 +7,19 @@ dev-db:
 	docker compose up db -d
 
 backend:
-	cd webapp/backend && uvicorn app.main:app --reload
+	cd backend && uvicorn app.main:app --reload
 
 frontend:
-	cd webapp/frontend && npm run dev
+	cd frontend && npm run dev
 
 scraper:
 	docker compose run --rm scraper
 
 migrate:
-	cd webapp/backend && alembic upgrade head
+	docker compose --profile migrate run --rm migrate
 
 makemigrations:
-	cd webapp/backend && alembic revision --autogenerate -m "$(msg)"
+	cd packages/db && alembic revision --autogenerate -m "$(msg)"
 
 test:
 	pytest
