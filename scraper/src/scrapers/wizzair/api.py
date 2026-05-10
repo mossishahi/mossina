@@ -16,6 +16,7 @@ Discovery priority:
 
 import json
 import logging
+import os
 import random
 import re
 import threading
@@ -29,6 +30,9 @@ log = logging.getLogger("scraper")
 
 _HOMEPAGE_URL = "https://wizzair.com/"
 _SCRAPFLY_URL = "https://api.scrapfly.io/scrape"
+_PERSISTED_CACHE_PATH = os.environ.get(
+    "WIZZAIR_CACHE_PATH", "/var/cache/mossina/wizzair_api_url"
+)
 
 _HEADERS = {
     "User-Agent": (
@@ -70,18 +74,33 @@ def _get_scrapfly_key():
 
 
 # ------------------------------------------------------------------
-# In-memory URL cache
+# URL cache (in-memory + on-disk so cron runs share it)
 # ------------------------------------------------------------------
 
 def _cache_url(url):
     global _cached_api_url
     with _cached_api_lock:
         _cached_api_url = url
+    try:
+        os.makedirs(os.path.dirname(_PERSISTED_CACHE_PATH), exist_ok=True)
+        with open(_PERSISTED_CACHE_PATH, "w") as f:
+            f.write(url.strip())
+    except OSError as exc:
+        log.debug("[W6] could not persist cached API URL: %s", exc)
 
 
 def _get_cached_url():
     with _cached_api_lock:
-        return _cached_api_url
+        if _cached_api_url:
+            return _cached_api_url
+    try:
+        with open(_PERSISTED_CACHE_PATH) as f:
+            url = f.read().strip()
+            if url:
+                return url
+    except OSError:
+        pass
+    return ""
 
 
 # ------------------------------------------------------------------
@@ -148,6 +167,23 @@ def _probe_url(url):
         return False
 
 
+_API_URL_PATTERNS = [
+    r'"apiUrl"\s*:\s*"([^"]+)"',
+    r"'apiUrl'\s*:\s*'([^']+)'",
+    r'apiUrl\s*[:=]\s*["\']([^"\']+)',
+    r'(https?:\\?/\\?/be\.wizzair\.com\\?/\d+\.\d+\.\d+\\?/Api)',
+]
+
+
+def _extract_api_url(html):
+    """Try several patterns to find the API URL in homepage HTML."""
+    for pat in _API_URL_PATTERNS:
+        m = re.search(pat, html)
+        if m:
+            return m.group(1).replace("\\u002F", "/").replace("\\/", "/")
+    return None
+
+
 def _discover_from_homepage():
     key = _get_scrapfly_key()
     if key:
@@ -157,10 +193,18 @@ def _discover_from_homepage():
                 "url": _HOMEPAGE_URL,
             }, timeout=30)
             resp.raise_for_status()
-            html = resp.json().get("result", {}).get("content", "")
-            match = re.search(r'"apiUrl"\s*:\s*"([^"]+)"', html)
-            if match:
-                return match.group(1).replace("\\u002F", "/")
+            payload = resp.json()
+            result = payload.get("result", {}) or {}
+            inner_status = result.get("status_code")
+            html = result.get("content", "") or ""
+            url = _extract_api_url(html)
+            if url:
+                return url
+            log.warning(
+                "[W6] ScrapFly returned 200 but no apiUrl found "
+                "(inner status=%s, content length=%d)",
+                inner_status, len(html),
+            )
         except Exception as exc:
             log.warning("[W6] ScrapFly homepage fetch failed: %s", exc)
 
@@ -173,9 +217,13 @@ def _discover_from_homepage():
         try:
             resp = requests.get(_HOMEPAGE_URL, headers=html_headers, timeout=30)
             resp.raise_for_status()
-            match = re.search(r'"apiUrl"\s*:\s*"([^"]+)"', resp.text)
-            if match:
-                return match.group(1).replace("\\u002F", "/")
+            url = _extract_api_url(resp.text)
+            if url:
+                return url
+            log.warning(
+                "[W6] Direct homepage 200 but no apiUrl found (attempt %d/%d, len=%d)",
+                attempt, MAX_RETRIES, len(resp.text),
+            )
         except requests.RequestException as exc:
             log.warning(
                 "[W6] Homepage fetch failed: %s (attempt %d/%d)",
@@ -254,9 +302,10 @@ class WizzairSession:
             self._session = _shared_session
 
     def _discover_api(self):
-        cached = _get_cached_url()
-        if cached:
-            self._api_base = cached
+        with _cached_api_lock:
+            in_mem = _cached_api_url
+        if in_mem:
+            self._api_base = in_mem
             log.info("[W6-w%d] Using cached URL: %s", self.worker_id, self._api_base)
             return
 
@@ -265,13 +314,23 @@ class WizzairSession:
         if hp_url:
             self._api_base = hp_url
             _cache_url(hp_url)
+            log.info("[W6-w%d] API base: %s", self.worker_id, self._api_base)
+            return
 
-        if self._api_base is None:
-            raise RuntimeError(
-                "Could not discover Wizzair API URL. "
-                "Set WIZZAIR_API_URL env var or pass --wizzair-api-url."
+        on_disk = _get_cached_url()
+        if on_disk:
+            self._api_base = on_disk
+            _cache_url(on_disk)
+            log.warning(
+                "[W6-w%d] Discovery failed; falling back to on-disk cached URL: %s",
+                self.worker_id, self._api_base,
             )
-        log.info("[W6-w%d] API base: %s", self.worker_id, self._api_base)
+            return
+
+        raise RuntimeError(
+            "Could not discover Wizzair API URL. "
+            "Set WIZZAIR_API_URL env var or pass --wizzair-api-url."
+        )
 
     def _base(self):
         if self._api_base is None:

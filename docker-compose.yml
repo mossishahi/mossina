@@ -46,8 +46,11 @@ services:
         condition: service_healthy
     env_file:
       - .env
+    volumes:
+      - scraper_cache:/var/cache/mossina
     profiles:
       - scraper
 
 volumes:
   pgdata:
+  scraper_cache:
