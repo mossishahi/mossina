@@ -4,7 +4,6 @@ import { DeckGL } from "@deck.gl/react";
 import { ArcLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { Map as MapLibreMap } from "react-map-gl/maplibre";
 import { useAirports } from "@/hooks/useAirports";
-import { useRoutes } from "@/hooks/useRoutes";
 import { useMapStore } from "@/stores/mapStore";
 import { usePathStore } from "@/stores/pathStore";
 import { useThemeStore } from "@/stores/themeStore";
@@ -61,10 +60,8 @@ function hexToRgba(hex: string, alpha = 220): [number, number, number, number] {
 
 export default function Globe({ onArcClick }: Props) {
   const { data: airports = [] } = useAirports();
-  const { data: routes = [] } = useRoutes();
   const selectedCities = useMapStore((s) => s.selectedCities);
   const toggleCity = useMapStore((s) => s.toggleCity);
-  const searchActive = usePathStore((s) => s.searchActive);
   const selectedPaths = usePathStore((s) => s.selectedPaths);
   const theme = useThemeStore((s) => s.theme);
 
@@ -113,13 +110,17 @@ export default function Globe({ onArcClick }: Props) {
     // Rough zoom heuristic: span 1 deg -> z=8, span 30 deg -> z=4, span 60 deg -> z=3
     const zoom = Math.max(2.5, Math.min(7, 8 - Math.log2(Math.max(span, 1) + 1) * 1.6));
 
-    setViewState((prev) => ({
-      ...prev,
+    // Snap to view with a clean object (no spread of prev). Spreading the
+    // previous state could carry over transient deck.gl-internal fields
+    // (transitionInterpolator, _interactionState, etc.) and leave the
+    // controller in a partially-paused state.
+    setViewState({
       longitude: midLon,
       latitude: midLat,
       zoom,
-      transitionDuration: 800,
-    }) as typeof prev);
+      bearing: 0,
+      pitch: 0,
+    });
   }, [selectedPaths, airportMap]);
 
   const points = useMemo<PointDatum[]>(
@@ -133,45 +134,6 @@ export default function Globe({ onArcClick }: Props) {
       })),
     [airports, selectedCities],
   );
-
-  // Routes touching any selected city -- with per-pair offset so multi-airline
-  // pairs are visually separated.
-  const selectionArcs = useMemo<ArcDatum[]>(() => {
-    if (selectedCities.size === 0) return [];
-    const filtered = routes.filter(
-      (r) => selectedCities.has(r.origin) || selectedCities.has(r.destination),
-    );
-    const pairCount = new Map<string, number>();
-    filtered.forEach((r) => {
-      const key = [r.origin, r.destination].sort().join("-");
-      pairCount.set(key, (pairCount.get(key) || 0) + 1);
-    });
-    const pairIdx = new Map<string, number>();
-    const out: ArcDatum[] = [];
-    for (const r of filtered) {
-      const o = airportMap.get(r.origin);
-      const d = airportMap.get(r.destination);
-      if (!o || !d) continue;
-      const meta = AIRLINE_META[r.airline];
-      const key = [r.origin, r.destination].sort().join("-");
-      const multi = (pairCount.get(key) || 1) > 1;
-      const idx = pairIdx.get(key) || 0;
-      pairIdx.set(key, idx + 1);
-      out.push({
-        startLat: o.lat,
-        startLng: o.lon,
-        endLat: d.lat,
-        endLng: d.lon,
-        color: hexToRgba(meta?.color || "#58a6ff", 200),
-        airline: r.airline,
-        origin: r.origin,
-        destination: r.destination,
-        isPath: false,
-        height: multi ? 0.25 + idx * 0.18 : 0.35,
-      });
-    }
-    return out;
-  }, [routes, selectedCities, airportMap]);
 
   const pathArcs = useMemo<ArcDatum[]>(() => {
     if (selectedPaths.length === 0) return [];
@@ -199,13 +161,10 @@ export default function Globe({ onArcClick }: Props) {
     return out;
   }, [selectedPaths, airportMap]);
 
-  // Display priority: selected-path arcs first, otherwise selection arcs,
-  // otherwise nothing while a search is active.
-  const arcs = useMemo<ArcDatum[]>(() => {
-    if (pathArcs.length > 0) return pathArcs;
-    if (searchActive) return [];
-    return selectionArcs;
-  }, [pathArcs, selectionArcs, searchActive]);
+  // Arcs are only rendered for an explicit path selection from the result
+  // list. Picking cities in the sidebar/tree no longer paints their routes
+  // -- the selected city dots themselves indicate activation.
+  const arcs = pathArcs;
 
   const handlePointClick = useCallback(
     (info: { object?: PointDatum }) => {
@@ -246,28 +205,37 @@ export default function Globe({ onArcClick }: Props) {
         id: "airports",
         data: points,
         getPosition: (d) => [d.lng, d.lat],
-        getRadius: (d) => (d.selected ? 5 : 3),
+        getRadius: (d) => (d.selected ? 7 : 3),
         radiusUnits: "pixels",
+        // Selected dots: theme-aware "active" color. Bright cyan-ish on the
+        // dark basemap (#58a6ff), saturated GitHub blue on the light basemap
+        // (#0969da) so they pop against either backdrop.
         getFillColor: (d) =>
           d.selected
-            ? [88, 166, 255, 255]
+            ? theme === "dark"
+              ? [88, 166, 255, 255]
+              : [9, 105, 218, 255]
             : theme === "dark"
               ? [180, 190, 200, 220]
               : [60, 70, 90, 220],
         getLineColor: (d) =>
           d.selected
-            ? [255, 255, 255, 255]
+            ? theme === "dark"
+              ? [255, 255, 255, 255]
+              : [255, 255, 255, 255]
             : theme === "dark"
               ? [20, 25, 35, 220]
               : [255, 255, 255, 220],
         lineWidthUnits: "pixels",
-        getLineWidth: 1,
+        getLineWidth: (d) => (d.selected ? 2 : 1),
         stroked: true,
         pickable: true,
         onClick: handlePointClick,
         updateTriggers: {
           getFillColor: theme,
           getLineColor: theme,
+          getRadius: 0,
+          getLineWidth: 0,
         },
       }),
     ],

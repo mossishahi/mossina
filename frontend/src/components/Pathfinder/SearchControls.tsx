@@ -19,7 +19,7 @@ export default function SearchControls({
   const anyPending = pathPending || cyclePending;
 
   return (
-    <div className="bg-black/80 backdrop-blur-xl border border-[#30363d] rounded-xl overflow-hidden">
+    <div className="bg-black/80 backdrop-blur-xl border border-[#30363d] rounded-xl overflow-hidden pointer-events-auto">
       <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
         <Compass size={13} className="text-[#58a6ff] shrink-0" />
         <span className="text-xs font-semibold text-white flex-1">Route Finder</span>

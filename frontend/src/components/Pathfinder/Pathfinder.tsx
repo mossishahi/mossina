@@ -1,5 +1,8 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { ChevronRight, Filter, Check } from "lucide-react";
+import type { CSSProperties } from "react";
+import { createPortal } from "react-dom";
+import { ChevronRight, SlidersHorizontal, Check, MapPin, RotateCcw } from "lucide-react";
+import { List as VList } from "react-window";
 import { useSearchPaths, useSearchCycles } from "@/hooks/useSearch";
 import { useAirports } from "@/hooks/useAirports";
 import { useMapStore } from "@/stores/mapStore";
@@ -8,37 +11,102 @@ import { usePathStore, pathKey_ } from "@/stores/pathStore";
 import { AIRLINE_META } from "@/api/types";
 import type { PathResult } from "@/api/types";
 import SearchControls from "./SearchControls";
-import HopFilter, { emptyHop } from "./HopFilter";
-import type { HopFilterValue } from "./HopFilter";
-import LegArrow, { emptyLeg } from "./LegArrow";
-import type { LegFilterValue } from "./LegArrow";
+import RangeSlider from "./RangeSlider";
 
-// A "round trip" (cycle) is just a path whose origin equals its destination.
+// ----- Filter model ----------------------------------------------------
+
+// Stay slider hard limits. Defaults are what the slider starts at; bounds
+// are the slider's full sweep.
+const DAYS_MIN = 1;
+const DAYS_MAX = 14;
+const DEFAULT_MIN_DAYS = 1;
+const DEFAULT_MAX_DAYS = 4;
+
+// Virtualization config for the path lists inside each Stops group.
+// Each PathCard renders in one horizontal line (overflow-x-auto handles
+// the long itineraries), so the row height is constant. The 4px we add
+// on top of the card height plays the role of `space-y-1` between rows.
+const ROW_HEIGHT = 36;
+const ROW_PADDING_Y = 2;
+const MAX_LIST_HEIGHT = 480;
+
+interface HopFilterValue {
+  minDays: number;
+  maxDays: number;
+  includeCities: string[];
+  excludeCities: string[];
+}
+
+interface GroupFilters {
+  onlySelected: boolean;
+  onlyRoundTrips: boolean;
+  hops: HopFilterValue[]; // length = stop count = legs.length + 1
+}
+
+const emptyHop = (): HopFilterValue => ({
+  minDays: DEFAULT_MIN_DAYS,
+  maxDays: DEFAULT_MAX_DAYS,
+  includeCities: [],
+  excludeCities: [],
+});
+
+function defaultGroupFilters(legCount: number): GroupFilters {
+  return {
+    onlySelected: false,
+    onlyRoundTrips: false,
+    hops: Array.from({ length: legCount + 1 }, emptyHop),
+  };
+}
+
+// "No constraint" state. Used by Reset and by the active-filter check.
+function neutralGroupFilters(legCount: number): GroupFilters {
+  return {
+    onlySelected: false,
+    onlyRoundTrips: false,
+    hops: Array.from({ length: legCount + 1 }, () => ({
+      minDays: DAYS_MIN,
+      maxDays: DAYS_MAX,
+      includeCities: [],
+      excludeCities: [],
+    })),
+  };
+}
+
+// A "round trip" (cycle) is a path whose origin equals its destination.
 function isRoundTrip(p: PathResult): boolean {
   return p.path.length > 1 && p.path[0] === p.path[p.path.length - 1];
 }
 
-// Per-group filters. Each "Stops" group has its own copy.
-interface GroupFilters {
-  onlySelected: boolean;
-  onlyRoundTrips: boolean;
-}
-
-const emptyGroupFilters = (): GroupFilters => ({
-  onlySelected: false,
-  onlyRoundTrips: false,
-});
-
+// Is anything constraining the result list? Compared against the slider's
+// full sweep [DAYS_MIN, DAYS_MAX], not the visual default [1, 4]. So
+// applying defaults still counts as "active".
 function isGroupFilterActive(f: GroupFilters): boolean {
-  return f.onlySelected || f.onlyRoundTrips;
+  if (f.onlySelected || f.onlyRoundTrips) return true;
+  return f.hops.some((h, i) => {
+    if (h.includeCities.length > 0 || h.excludeCities.length > 0) return true;
+    const isIntermediate = i > 0 && i < f.hops.length - 1;
+    if (isIntermediate && (h.minDays > DAYS_MIN || h.maxDays < DAYS_MAX)) return true;
+    return false;
+  });
 }
+
+// Does any stop constrain the stay duration (away from "any duration")?
+// We treat [DAYS_MIN, DAYS_MAX] as "no constraint".
+function hopsHaveDayConstraints(hops: HopFilterValue[]): boolean {
+  return hops.some(
+    (h, i) =>
+      // Only intermediates contribute -- endpoints don't stay
+      i > 0 && i < hops.length - 1 &&
+      (h.minDays !== DAYS_MIN || h.maxDays !== DAYS_MAX),
+  );
+}
+
+// ----- Pathfinder ------------------------------------------------------
 
 export default function Pathfinder() {
   const [maxHops, setMaxHops] = useState(3);
   const [groupFilters, setGroupFilters] = useState<Record<number, GroupFilters>>({});
   const [openGroups, setOpenGroups] = useState<Set<number>>(new Set());
-  const [hopFilters, setHopFilters] = useState<Record<number, HopFilterValue[]>>({});
-  const [legFilters, setLegFilters] = useState<Record<number, LegFilterValue[]>>({});
   const selectedCities = useMapStore((s) => s.selectedCities);
   const activeAirlines = useMapStore((s) => s.activeAirlines);
   const { dateFrom, dateTo } = useFilterStore();
@@ -66,8 +134,6 @@ export default function Pathfinder() {
       setSearchActive(false);
       pathMutation.reset();
       cycleMutation.reset();
-      setHopFilters({});
-      setLegFilters({});
       setGroupFilters({});
       setOpenGroups(new Set());
     }
@@ -80,13 +146,9 @@ export default function Pathfinder() {
     const from = dateFrom || new Date().toISOString().slice(0, 10);
     const to =
       dateTo ||
-      new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .slice(0, 10);
+      new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
     setOpenGroups(new Set());
-    setHopFilters({});
-    setLegFilters({});
     setGroupFilters({});
     clearPaths();
     setSearchActive(true);
@@ -122,18 +184,15 @@ export default function Pathfinder() {
       ? Math.max(pathTimeMs ?? 0, cycleTimeMs ?? 0)
       : undefined;
 
-  // Merge path and cycle search results into a single ordered list. Cycle
-  // results have origin == destination; path results never do, so the two
-  // sets are disjoint and we don't need to dedup.
-  const results = useMemo(() => {
-    return [...pathResults, ...cycleResults];
-  }, [pathResults, cycleResults]);
+  const results = useMemo(
+    () => [...pathResults, ...cycleResults],
+    [pathResults, cycleResults],
+  );
 
   const anyPending = pathMutation.isPending || cycleMutation.isPending;
   const anySuccess = pathMutation.isSuccess || cycleMutation.isSuccess;
   const anyError = pathMutation.isError && cycleMutation.isError;
 
-  // Group raw results by number of stops (= legs.length), sorted by cost.
   const grouped = useMemo(() => {
     const g: Record<number, PathResult[]> = {};
     results.forEach((p) => {
@@ -149,22 +208,32 @@ export default function Pathfinder() {
 
   const stopGroups = Object.keys(grouped).map(Number).sort((a, b) => a - b);
 
-  // Apply a single group's filter (onlySelected / onlyRoundTrips) to its paths.
+  // Apply all per-group filters (booleans + hops include/exclude).
+  // Day constraints are NOT applied client-side -- those need the
+  // backend to reprice. See applyDayRepricing below.
   const applyGroupFilters = useCallback(
     (paths: PathResult[], stops: number): PathResult[] => {
-      const f = groupFilters[stops] || emptyGroupFilters();
+      const f = groupFilters[stops];
+      if (!f) return paths;
       let out = paths;
       if (f.onlyRoundTrips) out = out.filter(isRoundTrip);
       if (f.onlySelected && selectedCities.size > 0) {
         out = out.filter((p) => p.path.every((iata) => selectedCities.has(iata)));
       }
+      out = out.filter((p) => {
+        for (let i = 0; i < p.path.length; i++) {
+          const h = f.hops[i];
+          if (!h) continue;
+          if (h.includeCities.length > 0 && !h.includeCities.includes(p.path[i])) return false;
+          if (h.excludeCities.includes(p.path[i])) return false;
+        }
+        return true;
+      });
       return out;
     },
     [groupFilters, selectedCities],
   );
 
-  // Total visible-trip count after per-group filters (but before hop/leg filters,
-  // which only shrink the expanded view).
   const totalFiltered = useMemo(
     () => stopGroups.reduce((sum, n) => sum + applyGroupFilters(grouped[n] || [], n).length, 0),
     [stopGroups, grouped, applyGroupFilters],
@@ -175,7 +244,7 @@ export default function Pathfinder() {
     [groupFilters],
   );
 
-  // Auto-expand the first stops group when a new result set comes in.
+  // Auto-expand the first stops group when a new result set arrives.
   useMemo(() => {
     if (stopGroups.length > 0 && openGroups.size === 0) {
       setOpenGroups(new Set([stopGroups[0]]));
@@ -195,111 +264,58 @@ export default function Pathfinder() {
     return nameMap.get(iata) || iata;
   }
 
-  function getHopFiltersForLength(n: number): HopFilterValue[] {
-    if (hopFilters[n]) return hopFilters[n];
-    return Array.from({ length: n + 1 }, () => emptyHop());
-  }
-
-  function getLegFiltersForLength(n: number): LegFilterValue[] {
-    if (legFilters[n]) return legFilters[n];
-    return Array.from({ length: n }, () => emptyLeg());
-  }
-
   const [repricing, setRepricing] = useState(false);
-  const repricingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  const updateHopFilter = useCallback((length: number, stopIdx: number, val: HopFilterValue) => {
-    setHopFilters((prev) => {
-      const current = prev[length] || Array.from({ length: length + 1 }, () => emptyHop());
-      const next = [...current];
-      next[stopIdx] = val;
-
-      const hasDays = next.some((h) => h.minDays != null || h.maxDays != null);
-      if (hasDays && lastSearchRef.current) {
-        clearTimeout(repricingTimer.current);
-        setRepricing(true);
-        const hopConstraints = next.map((h) => ({
-          min_stay_days: h.minDays,
-          max_stay_days: h.maxDays,
-          include_cities: h.includeCities.length > 0 ? h.includeCities : null,
-          exclude_cities: h.excludeCities.length > 0 ? h.excludeCities : null,
-        }));
-        repricingTimer.current = setTimeout(() => {
-          const s = lastSearchRef.current!;
-          // Re-run BOTH paths and cycles so the merged list stays in sync.
-          pathMutation.mutate(
-            {
-              origins: s.cities,
-              destinations: s.cities,
-              max_hops: maxHops,
-              date_from: s.from,
-              date_to: s.to,
-              only_selected: false,
-              airline: s.airline,
-              hop_filters: hopConstraints,
-            } as any,
-            {
-              onSuccess: (data) => {
-                if (data?.results) updateSelectedResults(data.results);
-              },
-            },
-          );
-          cycleMutation.mutate(
-            {
-              origins: s.cities,
-              max_hops: maxHops,
-              date_from: s.from,
-              date_to: s.to,
-              only_selected: false,
-              hop_filters: hopConstraints,
-            } as any,
-            {
-              onSuccess: (data) => {
-                if (data?.results) updateSelectedResults(data.results);
-              },
-              onSettled: () => setRepricing(false),
-            },
-          );
-        }, 600);
-      }
-
-      return { ...prev, [length]: next };
-    });
-  }, [maxHops]);
-
-  const updateLegFilter = useCallback((length: number, legIdx: number, val: LegFilterValue) => {
-    setLegFilters((prev) => {
-      const current = prev[length] || Array.from({ length: length }, () => emptyLeg());
-      const next = [...current];
-      next[legIdx] = val;
-      return { ...prev, [length]: next };
-    });
-  }, []);
-
-  function applyHopFilters(paths: PathResult[], length: number): PathResult[] {
-    const hops = getHopFiltersForLength(length);
-    const legs = getLegFiltersForLength(length);
-    return paths.filter((p) => {
-      for (let i = 0; i < p.path.length; i++) {
-        const f = hops[i];
-        if (!f) continue;
-        if (f.includeCities.length > 0 && !f.includeCities.includes(p.path[i])) return false;
-        if (f.excludeCities.includes(p.path[i])) return false;
-      }
-      for (let i = 0; i < p.legs.length; i++) {
-        const lf = legs[i];
-        if (!lf) continue;
-        if (lf.airline && p.legs[i].airline !== lf.airline) return false;
-      }
-      return true;
-    });
-  }
-
-  const allAirlines = useMemo(() => {
-    const codes = new Set<string>();
-    results.forEach((r) => r.legs.forEach((l) => codes.add(l.airline)));
-    return [...codes].sort();
-  }, [results]);
+  // When a group's filters are applied with day constraints, re-fetch the
+  // search with hop_filters so the backend can reprice with new stay rules.
+  const applyDayRepricing = useCallback(
+    (filters: GroupFilters) => {
+      if (!lastSearchRef.current) return;
+      if (!hopsHaveDayConstraints(filters.hops)) return;
+      const s = lastSearchRef.current;
+      const hopConstraints = filters.hops.map((h) => ({
+        min_stay_days: h.minDays,
+        max_stay_days: h.maxDays,
+        include_cities: h.includeCities.length > 0 ? h.includeCities : null,
+        exclude_cities: h.excludeCities.length > 0 ? h.excludeCities : null,
+      }));
+      setRepricing(true);
+      pathMutation.mutate(
+        {
+          origins: s.cities,
+          destinations: s.cities,
+          max_hops: maxHops,
+          date_from: s.from,
+          date_to: s.to,
+          only_selected: false,
+          airline: s.airline,
+          hop_filters: hopConstraints,
+        } as any,
+        {
+          onSuccess: (data) => {
+            if (data?.results) updateSelectedResults(data.results);
+          },
+        },
+      );
+      cycleMutation.mutate(
+        {
+          origins: s.cities,
+          max_hops: maxHops,
+          date_from: s.from,
+          date_to: s.to,
+          only_selected: false,
+          hop_filters: hopConstraints,
+        } as any,
+        {
+          onSuccess: (data) => {
+            if (data?.results) updateSelectedResults(data.results);
+          },
+          onSettled: () => setRepricing(false),
+        },
+      );
+    },
+    [maxHops],
+  );
 
   return (
     <>
@@ -313,7 +329,7 @@ export default function Pathfinder() {
         cycleDone={cycleMutation.isSuccess}
       />
 
-      <div className="bg-black/80 backdrop-blur-xl border border-[#30363d] rounded-xl overflow-hidden">
+      <div className="bg-black/80 backdrop-blur-xl border border-[#30363d] rounded-xl overflow-hidden pointer-events-auto">
         <div className="px-3 py-2 space-y-1.5">
           {anyError && (
             <div className="text-xs text-[#e5534b] bg-[#e5534b]/10 border border-[#e5534b]/30 rounded-md p-2.5">
@@ -346,10 +362,8 @@ export default function Pathfinder() {
               {stopGroups.map((n) => {
                 const allPaths = grouped[n];
                 const groupFiltered = applyGroupFilters(allPaths, n);
-                const hopFilteredPaths = applyHopFilters(groupFiltered, n);
                 const isOpen = openGroups.has(n);
-                const hf = getHopFiltersForLength(n);
-                const filtersValue = groupFilters[n] || emptyGroupFilters();
+                const filtersValue = groupFilters[n] || defaultGroupFilters(n);
                 return (
                   <div key={n}>
                     <div className="w-full flex items-center gap-2 px-1 py-1.5 border-t border-[#21262d]">
@@ -365,52 +379,44 @@ export default function Pathfinder() {
                           {n + 1} Stops
                         </span>
                         <span className="text-[10px] text-[#484f58] bg-[#161b22] px-1.5 py-0.5 rounded-full">
-                          {hopFilteredPaths.length !== allPaths.length
-                            ? `${hopFilteredPaths.length}/${allPaths.length}`
+                          {groupFiltered.length !== allPaths.length
+                            ? `${groupFiltered.length}/${allPaths.length}`
                             : `${allPaths.length}`}
                         </span>
                       </button>
                       <FilterMenu
+                        legCount={n}
                         value={filtersValue}
-                        onApply={(next) =>
-                          setGroupFilters((prev) => ({ ...prev, [n]: next }))
-                        }
+                        onApply={(next) => {
+                          setGroupFilters((prev) => ({ ...prev, [n]: next }));
+                          applyDayRepricing(next);
+                        }}
                       />
                     </div>
 
                     {isOpen && (
                       <div className="pb-1">
-                        <div className="flex gap-0.5 px-2 py-2 items-center justify-center">
-                          {Array.from({ length: n + 1 }, (_, i) => {
-                            const lf = getLegFiltersForLength(n);
-                            const isEndpoint = i === 0 || i === n;
-                            return (
-                              <span key={i} className="inline-flex items-center">
-                                <HopFilter
-                                  index={i}
-                                  isEndpoint={isEndpoint}
-                                  value={hf[i] || emptyHop()}
-                                  onChange={(val) => updateHopFilter(n, i, val)}
-                                />
-                                {i < n && (
-                                  <LegArrow
-                                    value={lf[i] || emptyLeg()}
-                                    onChange={(val) => updateLegFilter(n, i, val)}
-                                    airlines={allAirlines}
-                                  />
-                                )}
-                              </span>
-                            );
-                          })}
-                        </div>
-                        <div className="space-y-1">
-                          {hopFilteredPaths.map((p, i) => (
-                            <PathCard key={i} result={p} cityName={cityName} pathKey={pathKey_(p)} hopFilters={hf} />
-                          ))}
-                          {hopFilteredPaths.length === 0 && (
-                            <p className="text-[10px] text-[#484f58] text-center py-2">No matches</p>
-                          )}
-                        </div>
+                        {groupFiltered.length === 0 ? (
+                          <p className="text-[10px] text-[#484f58] text-center py-2">No matches</p>
+                        ) : (
+                          <VList<PathRowExtraProps>
+                            rowComponent={PathRow}
+                            rowCount={groupFiltered.length}
+                            rowHeight={ROW_HEIGHT}
+                            rowProps={{
+                              items: groupFiltered,
+                              cityName,
+                              hops: filtersValue.hops,
+                            }}
+                            overscanCount={6}
+                            style={{
+                              height: Math.min(
+                                groupFiltered.length * ROW_HEIGHT,
+                                MAX_LIST_HEIGHT,
+                              ),
+                            }}
+                          />
+                        )}
                       </div>
                     )}
                   </div>
@@ -438,16 +444,54 @@ export default function Pathfinder() {
   );
 }
 
+// ----- PathRow (virtualized row wrapper for react-window v2) -----------
+
+// Props that we pass via the List's `rowProps`. react-window will merge in
+// `index` + `style` + aria attributes automatically.
+interface PathRowExtraProps {
+  items: PathResult[];
+  cityName: (iata: string) => string;
+  hops: HopFilterValue[];
+}
+
+interface PathRowInjectedProps {
+  index: number;
+  style: CSSProperties;
+}
+
+function PathRow({
+  index,
+  style,
+  items,
+  cityName,
+  hops,
+}: PathRowExtraProps & PathRowInjectedProps) {
+  const p = items[index];
+  return (
+    <div
+      style={{
+        ...style,
+        paddingTop: ROW_PADDING_Y,
+        paddingBottom: ROW_PADDING_Y,
+      }}
+    >
+      <PathCard result={p} cityName={cityName} pathKey={pathKey_(p)} hops={hops} />
+    </div>
+  );
+}
+
+// ----- PathCard --------------------------------------------------------
+
 function PathCard({
   result,
   cityName,
   pathKey,
-  hopFilters,
+  hops,
 }: {
   result: PathResult;
   cityName: (iata: string) => string;
   pathKey: string;
-  hopFilters: HopFilterValue[];
+  hops: HopFilterValue[];
 }) {
   const selectedPaths = usePathStore((s) => s.selectedPaths);
   const togglePath = usePathStore((s) => s.togglePath);
@@ -465,7 +509,7 @@ function PathCard({
     e.stopPropagation();
     if (!isSelected) {
       togglePath(result);
-      setMinDays(pathKey, hopFilters.map((hf) => (hf.minDays ?? 1) * 24));
+      setMinDays(pathKey, hops.map((h) => h.minDays * 24));
     }
     autoSelectBestDates(pathKey, result);
   }
@@ -475,7 +519,7 @@ function PathCard({
       onClick={() => {
         togglePath(result);
         if (!isSelected) {
-          setMinDays(pathKey, hopFilters.map((hf) => (hf.minDays ?? 1) * 24));
+          setMinDays(pathKey, hops.map((h) => h.minDays * 24));
         }
       }}
       className={`group rounded-lg px-2.5 py-2 transition-all cursor-pointer overflow-x-auto border ${
@@ -495,9 +539,7 @@ function PathCard({
 
         {result.path.map((iata, i) => {
           const leg = i < result.legs.length ? result.legs[i] : null;
-          const color = leg
-            ? AIRLINE_META[leg.airline]?.color || "#8b949e"
-            : "#8b949e";
+          const color = leg ? AIRLINE_META[leg.airline]?.color || "#8b949e" : "#8b949e";
           return (
             <span key={i} className="inline-flex items-center gap-0.5">
               <span
@@ -520,21 +562,56 @@ function PathCard({
   );
 }
 
+// ----- FilterMenu (group-level filter popover) -------------------------
+
+// Fixed popover width (px). Used for placement math.
+const POPOVER_WIDTH = 340;
+const POPOVER_MARGIN = 4;
+
 function FilterMenu({
+  legCount,
   value,
   onApply,
 }: {
+  legCount: number;
   value: GroupFilters;
   onApply: (next: GroupFilters) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<GroupFilters>(value);
-  const ref = useRef<HTMLDivElement>(null);
+  // Popover anchor position (viewport coordinates). null = closed/unmeasured.
+  const [pos, setPos] = useState<{
+    top: number;
+    bottom: number;
+    right: number;
+    placement: "below" | "above";
+  } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const active = isGroupFilterActive(value);
+
+  function measure(): { top: number; bottom: number; right: number; placement: "below" | "above" } | null {
+    const btn = buttonRef.current;
+    if (!btn) return null;
+    const rect = btn.getBoundingClientRect();
+    // Rough popover height estimate: header (~70px) + per-stop label (~20px)
+    //   + (legCount+1) rows (~32px each) + padding (~30px).
+    const estHeight = 70 + 20 + (legCount + 1) * 32 + 30;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const placement = spaceBelow < estHeight && spaceAbove > spaceBelow ? "above" : "below";
+    return {
+      top: rect.bottom + POPOVER_MARGIN,
+      bottom: window.innerHeight - rect.top + POPOVER_MARGIN,
+      right: Math.max(POPOVER_MARGIN, window.innerWidth - rect.right),
+      placement,
+    };
+  }
 
   function openMenu(e: React.MouseEvent) {
     e.stopPropagation();
     setDraft(value);
+    setPos(measure());
     setOpen(true);
   }
 
@@ -543,37 +620,77 @@ function FilterMenu({
     setOpen(false);
   }
 
+  // Reset: clear every filter for this group. Sets the slider to the full
+  // [DAYS_MIN, DAYS_MAX] sweep (i.e., "no constraint") so the funnel icon
+  // also goes inactive.
+  function reset() {
+    const neutral = neutralGroupFilters(legCount);
+    setDraft(neutral);
+    onApply(neutral);
+    setOpen(false);
+  }
+
+  // Close on outside click. Checks both the trigger button and the
+  // portal-rendered popover (which is outside this component's DOM tree).
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const t = e.target as Node;
+      if (buttonRef.current && buttonRef.current.contains(t)) return;
+      if (popoverRef.current && popoverRef.current.contains(t)) return;
+      setOpen(false);
+    }
+    // Close on outside scrolls (ancestor scroll containers) only -- if the
+    // scroll target is INSIDE the popover (its own internal overflow), we
+    // leave it open.
+    function onScroll(e: Event) {
+      const t = e.target as Node | null;
+      if (t && popoverRef.current && popoverRef.current.contains(t)) return;
+      setOpen(false);
+    }
+    function onResize() {
+      setOpen(false);
     }
     document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
+    window.addEventListener("resize", onResize);
+    // Capture-phase so we catch scrolls in ancestor scroll containers
+    // (e.g., the sidebar's overflow-y-auto wrapper).
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", onScroll, true);
+    };
   }, [open]);
 
-  return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        onClick={openMenu}
-        className={`p-1 rounded transition-colors ${
-          active
-            ? "text-[#58a6ff] hover:text-[#79c0ff]"
-            : "text-[#484f58] hover:text-[#8b949e]"
-        }`}
-        title="Filter this group"
-        aria-label="Filter this group"
-      >
-        <Filter size={12} strokeWidth={2.2} />
-      </button>
+  function setHop(i: number, hop: HopFilterValue) {
+    setDraft((d) => {
+      const next = [...d.hops];
+      next[i] = hop;
+      return { ...d, hops: next };
+    });
+  }
 
-      {open && (
-        <div
-          className="absolute right-0 top-full mt-1 z-50 bg-[#161b22] border border-[#30363d] rounded-lg shadow-xl w-60 p-2"
-          onClick={(e) => e.stopPropagation()}
-        >
+  const popover = open && pos ? (
+    <div
+      ref={popoverRef}
+      style={{
+        position: "fixed",
+        right: pos.right,
+        top: pos.placement === "below" ? pos.top : "auto",
+        bottom: pos.placement === "above" ? pos.bottom : "auto",
+        width: POPOVER_WIDTH,
+        maxHeight: pos.placement === "below"
+          ? window.innerHeight - pos.top - 8
+          : window.innerHeight - pos.bottom - 8,
+        overflowY: "auto",
+      }}
+      className="z-50 bg-[#161b22] border border-[#30363d] rounded-lg shadow-xl p-3"
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
           <label className="flex items-center gap-2 cursor-pointer select-none px-1 py-1">
             <input
               type="checkbox"
@@ -592,16 +709,242 @@ function FilterMenu({
             />
             <span className="text-[11px] text-[#c9d1d9]">Same origin and destination only</span>
           </label>
-          <div className="flex justify-end pt-1 mt-1 border-t border-[#21262d]">
+        </div>
+        <div className="shrink-0 flex items-center gap-1">
+          <button
+            onClick={reset}
+            className="px-1.5 py-1 text-[10px] font-semibold text-[#8b949e] hover:text-[#e5534b] inline-flex items-center gap-1"
+            title="Reset all filters in this list"
+            aria-label="Reset filters for this group"
+          >
+            <RotateCcw size={11} />
+            Reset
+          </button>
+          <button
+            onClick={apply}
+            className="px-1.5 py-1 text-[10px] font-semibold text-[#3fb950] hover:text-[#56d364] inline-flex items-center gap-1"
+            title="Apply all filters"
+          >
+            <Check size={12} />
+            Apply
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-2 pt-2 border-t border-[#21262d]">
+        <p className="text-[10px] text-[#484f58] uppercase tracking-wider mb-1.5 px-1">
+          Per-stop filters
+        </p>
+        <div className="space-y-1">
+          {draft.hops.map((hop, i) => {
+            const isEndpoint = i === 0 || i === legCount;
+            return (
+              <HopRow
+                key={`hop-${i}`}
+                hop={hop}
+                isEndpoint={isEndpoint}
+                onChange={(h) => setHop(i, h)}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        ref={buttonRef}
+        onClick={openMenu}
+        className={`p-1 rounded transition-colors ${
+          active
+            ? "text-[#58a6ff] hover:text-[#79c0ff]"
+            : "text-[#484f58] hover:text-[#8b949e]"
+        }`}
+        title="Filter this group"
+        aria-label="Filter this group"
+      >
+        <SlidersHorizontal size={13} strokeWidth={2.2} />
+      </button>
+      {popover && createPortal(popover, document.body)}
+    </div>
+  );
+}
+
+// ----- HopRow ----------------------------------------------------------
+
+function HopRow({
+  hop,
+  isEndpoint,
+  onChange,
+}: {
+  hop: HopFilterValue;
+  isEndpoint: boolean;
+  onChange: (h: HopFilterValue) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 px-1 py-1">
+      <MapPin size={11} strokeWidth={2.2} className="text-[#8b949e] shrink-0" />
+      <TagInput
+        placeholder="include"
+        tags={hop.includeCities}
+        color="#3fb950"
+        onChange={(includeCities) => onChange({ ...hop, includeCities })}
+      />
+      <TagInput
+        placeholder="exclude"
+        tags={hop.excludeCities}
+        color="#e5534b"
+        onChange={(excludeCities) => onChange({ ...hop, excludeCities })}
+      />
+      {!isEndpoint && (
+        <div className="flex items-center gap-1.5 min-w-[110px]">
+          <RangeSlider
+            min={DAYS_MIN}
+            max={DAYS_MAX}
+            value={[hop.minDays, hop.maxDays]}
+            onChange={([minDays, maxDays]) => onChange({ ...hop, minDays, maxDays })}
+          />
+          <span className="text-[9px] text-[#8b949e] tabular-nums whitespace-nowrap shrink-0">
+            {hop.minDays}-{hop.maxDays}d
+          </span>
+        </div>
+      )}
+      {isEndpoint && <div className="min-w-[110px]" />}
+    </div>
+  );
+}
+
+// ----- TagInput (include/exclude airport tags) -------------------------
+
+function TagInput({
+  placeholder,
+  tags,
+  color,
+  onChange,
+}: {
+  placeholder: string;
+  tags: string[];
+  color: string;
+  onChange: (next: string[]) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [focused, setFocused] = useState(false);
+  const { data: airports = [] } = useAirports();
+
+  const { countryEntries, cityHits } = useMemo(() => {
+    if (!focused || !q.trim()) {
+      return {
+        countryEntries: [] as { name: string; code: string; cities: typeof airports }[],
+        cityHits: [] as typeof airports,
+      };
+    }
+    const lq = q.trim().toLowerCase();
+
+    const countryMap = new Map<string, { name: string; code: string; cities: typeof airports }>();
+    airports.forEach((a) => {
+      if (
+        (a.country || "").toLowerCase().includes(lq) ||
+        (a.country_code || "").toLowerCase() === lq
+      ) {
+        const key = a.country_code;
+        if (!countryMap.has(key)) countryMap.set(key, { name: a.country || key, code: key, cities: [] });
+        if (!tags.includes(a.iata)) countryMap.get(key)!.cities.push(a);
+      }
+    });
+
+    if (countryMap.size > 0) {
+      const entries = [...countryMap.values()].filter((e) => e.cities.length > 0);
+      const topCities = entries.flatMap((e) => e.cities).slice(0, 6);
+      return { countryEntries: entries, cityHits: topCities };
+    }
+
+    const cities = airports
+      .filter(
+        (a) =>
+          !tags.includes(a.iata) &&
+          (a.iata.toLowerCase().includes(lq) ||
+            (a.city || "").toLowerCase().includes(lq) ||
+            (a.name || "").toLowerCase().includes(lq)),
+      )
+      .slice(0, 6);
+    return { countryEntries: [], cityHits: cities };
+  }, [focused, q, airports, tags]);
+
+  const hasResults = countryEntries.length > 0 || cityHits.length > 0;
+
+  function addMany(iatas: string[]) {
+    // Prepend so newly-added items appear at the left edge of the tag
+    // list (right next to the input) rather than getting buried at the
+    // far right of an overflow-scrolled row.
+    const fresh = iatas.filter((c) => !tags.includes(c));
+    onChange([...fresh, ...tags]);
+    setQ("");
+  }
+
+  return (
+    <div className="relative flex-1 min-w-0">
+      <div className="flex items-center gap-0.5 bg-[#0d1117] border border-[#21262d] rounded px-1 py-[2px] overflow-x-auto no-scrollbar">
+        {/* Input first so there's always a typing area at the left, even
+            when tags overflow horizontally. Tags scroll right of it. */}
+        <input
+          type="text"
+          placeholder={tags.length === 0 ? placeholder : ""}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setTimeout(() => setFocused(false), 150)}
+          className="flex-1 min-w-[12px] bg-transparent text-[9px] text-[#c9d1d9] outline-none placeholder-[#484f58] py-px"
+        />
+        {tags.map((t) => (
+          <span
+            key={t}
+            className="shrink-0 inline-flex items-center gap-px px-1 rounded text-[8px] font-semibold"
+            style={{ background: `${color}22`, color }}
+          >
+            {t}
             <button
-              onClick={apply}
-              className="px-2 py-1 text-[10px] font-semibold text-[#3fb950] hover:text-[#56d364] inline-flex items-center gap-1"
-              title="Apply filters"
+              onClick={() => onChange(tags.filter((x) => x !== t))}
+              className="ml-0.5 text-[7px] opacity-70 hover:opacity-100"
             >
-              <Check size={12} />
-              Apply
+              ×
             </button>
-          </div>
+          </span>
+        ))}
+      </div>
+      {hasResults && (
+        <div className="absolute top-full left-0 right-0 mt-0.5 bg-[#1c2128] border border-[#30363d] rounded shadow-lg z-[110] max-h-40 overflow-y-auto">
+          {countryEntries.map((entry) => (
+            <button
+              key={`country-${entry.code}`}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                addMany(entry.cities.map((a) => a.iata));
+              }}
+              className="w-full text-left px-2 py-1 text-[9px] hover:bg-[#21262d] font-semibold border-b border-[#30363d] flex items-center gap-1.5"
+              style={{ color }}
+            >
+              <span>{entry.name}</span>
+              <span className="text-[#484f58] font-normal ml-auto">{entry.cities.length} cities</span>
+            </button>
+          ))}
+          {cityHits.map((a) => (
+            <button
+              key={a.iata}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!tags.includes(a.iata)) onChange([a.iata, ...tags]);
+                setQ("");
+              }}
+              className="w-full text-left px-2 py-0.5 text-[9px] hover:bg-[#21262d] flex items-center gap-1"
+            >
+              <span className="font-mono font-bold" style={{ color }}>{a.iata}</span>
+              <span className="text-[#8b949e] truncate">{a.city || a.name}</span>
+            </button>
+          ))}
         </div>
       )}
     </div>
