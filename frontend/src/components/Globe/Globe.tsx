@@ -7,7 +7,6 @@ import { useAirports } from "@/hooks/useAirports";
 import { useRoutes } from "@/hooks/useRoutes";
 import { useMapStore } from "@/stores/mapStore";
 import { usePathStore } from "@/stores/pathStore";
-import { useTabStore } from "@/stores/tabStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { AIRLINE_META } from "@/api/types";
 
@@ -65,18 +64,12 @@ export default function Globe({ onArcClick }: Props) {
   const { data: routes = [] } = useRoutes();
   const selectedCities = useMapStore((s) => s.selectedCities);
   const toggleCity = useMapStore((s) => s.toggleCity);
-  const activeTab = useTabStore((s) => s.activeTab);
   const searchActive = usePathStore((s) => s.searchActive);
-  const allTaggedPaths = usePathStore((s) => s.selectedPaths);
+  const selectedPaths = usePathStore((s) => s.selectedPaths);
   const theme = useThemeStore((s) => s.theme);
 
   const [viewState, setViewState] = useState(INITIAL_VIEW_STATE);
   const lastFitSig = useRef<string>("");
-
-  const selectedPaths = useMemo(
-    () => allTaggedPaths.filter((tp) => tp.tab === activeTab).map((tp) => tp.result),
-    [allTaggedPaths, activeTab],
-  );
 
   const airportMap = useMemo(() => {
     const m = new Map<string, (typeof airports)[0]>();

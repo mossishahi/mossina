@@ -1,26 +1,20 @@
 import { create } from "zustand";
 import type { PathResult } from "@/api/types";
-import type { TabId } from "@/stores/tabStore";
 
 export interface SegmentSelection {
   date: string;
   price_eur: number;
 }
 
-export interface TaggedPath {
-  result: PathResult;
-  tab: TabId;
-}
-
 interface PathStore {
-  selectedPaths: TaggedPath[];
+  selectedPaths: PathResult[];
   segmentSelections: Record<string, (SegmentSelection | null)[]>;
   minHoursPerStop: Record<string, (number | null)[]>;
   searchActive: boolean;
   setSearchActive: (v: boolean) => void;
-  togglePath: (path: PathResult, tab: TabId) => void;
-  updateSelectedResults: (newResults: PathResult[], tab: TabId) => void;
-  clearPaths: (tab?: TabId) => void;
+  togglePath: (path: PathResult) => void;
+  updateSelectedResults: (newResults: PathResult[]) => void;
+  clearPaths: () => void;
   selectSegmentDate: (pathKey: string, segIdx: number, sel: SegmentSelection | null) => void;
   autoSelectBestDates: (pathKey: string, path: PathResult) => void;
   setMinDays: (pathKey: string, stops: (number | null)[]) => void;
@@ -38,42 +32,37 @@ export const usePathStore = create<PathStore>((set) => ({
   searchActive: false,
   setSearchActive: (v) => set({ searchActive: v }),
 
-  updateSelectedResults: (newResults, tab) =>
+  updateSelectedResults: (newResults) =>
     set((state) => {
       const resultMap = new Map<string, PathResult>();
       newResults.forEach((r) => resultMap.set(pathKey(r), r));
       const nextSels = { ...state.segmentSelections };
-      const updatedPaths = state.selectedPaths.map((tp) => {
-        if (tp.tab !== tab) return tp;
-        const k = pathKey(tp.result);
+      const updatedPaths = state.selectedPaths.map((p) => {
+        const k = pathKey(p);
         const updated = resultMap.get(k);
         if (updated) {
           delete nextSels[k];
-          return { ...tp, result: updated };
+          return updated;
         }
-        return tp;
+        return p;
       });
       return { selectedPaths: updatedPaths, segmentSelections: nextSels };
     }),
 
-  togglePath: (path, tab) =>
+  togglePath: (path) =>
     set((state) => {
       const key = pathKey(path);
-      const exists = state.selectedPaths.some(
-        (tp) => pathKey(tp.result) === key && tp.tab === tab,
-      );
+      const exists = state.selectedPaths.some((p) => pathKey(p) === key);
       if (exists) {
         const next = { ...state.segmentSelections };
         delete next[key];
         return {
-          selectedPaths: state.selectedPaths.filter(
-            (tp) => !(pathKey(tp.result) === key && tp.tab === tab),
-          ),
+          selectedPaths: state.selectedPaths.filter((p) => pathKey(p) !== key),
           segmentSelections: next,
         };
       }
       return {
-        selectedPaths: [...state.selectedPaths, { result: path, tab }],
+        selectedPaths: [...state.selectedPaths, path],
         segmentSelections: {
           ...state.segmentSelections,
           [key]: new Array(path.legs.length).fill(null),
@@ -81,19 +70,7 @@ export const usePathStore = create<PathStore>((set) => ({
       };
     }),
 
-  clearPaths: (tab) =>
-    set((state) => {
-      if (!tab) return { selectedPaths: [], segmentSelections: {} };
-      const remaining = state.selectedPaths.filter((tp) => tp.tab !== tab);
-      const removedKeys = new Set(
-        state.selectedPaths
-          .filter((tp) => tp.tab === tab)
-          .map((tp) => pathKey(tp.result)),
-      );
-      const nextSels = { ...state.segmentSelections };
-      removedKeys.forEach((k) => delete nextSels[k]);
-      return { selectedPaths: remaining, segmentSelections: nextSels };
-    }),
+  clearPaths: () => set({ selectedPaths: [], segmentSelections: {} }),
 
   selectSegmentDate: (pk, segIdx, sel) =>
     set((state) => {

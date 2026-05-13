@@ -4,25 +4,19 @@ import { useQuery } from "@tanstack/react-query";
 import { getFares } from "@/api/client";
 import { useAirports } from "@/hooks/useAirports";
 import { usePathStore, pathKey_ } from "@/stores/pathStore";
-import type { SegmentSelection, TaggedPath } from "@/stores/pathStore";
-import { useTabStore } from "@/stores/tabStore";
+import type { SegmentSelection } from "@/stores/pathStore";
 import { useFilterStore } from "@/stores/filterStore";
 import { AIRLINE_META } from "@/api/types";
 import type { PathResult, PathLeg } from "@/api/types";
 
 export default function RouteDetail() {
-  const activeTab = useTabStore((s) => s.activeTab);
-  const allSelected = usePathStore((s) => s.selectedPaths);
+  const selectedPaths = usePathStore((s) => s.selectedPaths);
   const togglePath = usePathStore((s) => s.togglePath);
   const clearPaths = usePathStore((s) => s.clearPaths);
   const segmentSelections = usePathStore((s) => s.segmentSelections);
   const minHoursPerStop = usePathStore((s) => s.minHoursPerStop);
 
-  const selectedPaths = allSelected.filter((tp) => tp.tab === activeTab);
-
   if (selectedPaths.length === 0) return null;
-
-  const tabLabel = activeTab === "cycles" ? "cycle" : "path";
 
   return (
     <div className="absolute top-4 bottom-4 overflow-y-auto z-10 space-y-2 pr-1"
@@ -30,18 +24,17 @@ export default function RouteDetail() {
     >
       <div className="flex items-center justify-between px-1 mb-1">
         <span className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider">
-          {selectedPaths.length} {tabLabel}{selectedPaths.length > 1 ? "s" : ""} selected
+          {selectedPaths.length} trip{selectedPaths.length > 1 ? "s" : ""} selected
         </span>
         <button
-          onClick={() => clearPaths(activeTab)}
+          onClick={() => clearPaths()}
           className="text-[10px] text-[#e5534b] hover:underline"
         >
           Clear all
         </button>
       </div>
 
-      {selectedPaths.map((tp) => {
-        const path = tp.result;
+      {selectedPaths.map((path) => {
         const pk = pathKey_(path);
         const sels = segmentSelections[pk] || [];
         const mh = minHoursPerStop[pk] || [];
@@ -52,7 +45,7 @@ export default function RouteDetail() {
             pathKey={pk}
             selections={sels}
             minHours={mh}
-            onRemove={() => togglePath(path, activeTab)}
+            onRemove={() => togglePath(path)}
           />
         );
       })}
