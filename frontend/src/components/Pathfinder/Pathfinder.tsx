@@ -206,7 +206,7 @@ export default function Pathfinder() {
   }
 
   const [repricing, setRepricing] = useState(false);
-  const repricingTimer = useRef<ReturnType<typeof setTimeout>>();
+  const repricingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const updateHopFilter = useCallback((length: number, stopIdx: number, val: HopFilterValue) => {
     setHopFilters((prev) => {

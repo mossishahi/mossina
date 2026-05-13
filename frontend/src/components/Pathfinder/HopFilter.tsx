@@ -35,7 +35,7 @@ interface Props {
 export default function HopFilter({ index, isEndpoint, value, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout>>();
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const active = isHopActive(value);
 
   const keep = useCallback(() => clearTimeout(closeTimer.current), []);

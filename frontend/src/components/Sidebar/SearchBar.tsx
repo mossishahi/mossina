@@ -9,7 +9,7 @@ export default function SearchBar() {
   const [results, setResults] = useState<Airport[]>([]);
   const [open, setOpen] = useState(false);
   const toggleCity = useMapStore((s) => s.toggleCity);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
