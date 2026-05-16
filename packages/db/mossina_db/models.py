@@ -140,6 +140,11 @@ class Fare(Base):
     )
     departure_date: Mapped[date] = mapped_column(Date, nullable=False)
     arrival_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Times-of-day for the cheapest flight on this fare. Populated by the
+    # Ryanair cheapestPerDay scraper since Migration 004; null for legacy
+    # rows and for Wizz Air (which still relies on the schedules join).
+    departure_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    arrival_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     flight_number: Mapped[str | None] = mapped_column(String(32), nullable=True)

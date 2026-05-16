@@ -34,32 +34,35 @@ def _fare_to_out(
     f: Fare,
     rates: dict[str, Decimal],
     schedule_times: dict | None = None,
-    schedule_times_by_date: dict | None = None,
 ) -> FareOut:
     dep_time = None
     arr_time = None
-    if f.departure_date:
+
+    # Preferred: times stored directly on the fare row (populated by the
+    # Ryanair cheapestPerDay scraper since Migration 004).
+    if f.departure_time is not None:
+        dep_time = f.departure_time.strftime("%H:%M")
+    if f.arrival_time is not None:
+        arr_time = f.arrival_time.strftime("%H:%M")
+
+    # Fallback for legacy rows / Wizz Air: join with the schedules table by
+    # (flight_number, date). Only used if the fare doesn't carry times
+    # itself.
+    if (dep_time is None or arr_time is None) and schedule_times and f.flight_number and f.departure_date:
+        fn = f.flight_number
         date_str = str(f.departure_date)
-        # 1) Best case: match by (flight_number, date).
-        if schedule_times and f.flight_number:
-            fn = f.flight_number
-            times = schedule_times.get((fn, date_str))
-            # 2) Strip leading airline letters in case fares store "FR1234"
-            #    while schedules store "1234" (or vice versa).
-            if not times:
-                stripped = fn.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-                if stripped:
-                    times = schedule_times.get((stripped, date_str))
-            if times:
-                dep_time, arr_time = times
-        # 3) Final fallback: when the fare has no usable flight number (e.g.
-        #    Ryanair recently started returning just "FR" on the farfnd
-        #    endpoint), pick the earliest scheduled flight on that
-        #    route+date so the UI can still show *some* time.
-        if dep_time is None and schedule_times_by_date:
-            fallback = schedule_times_by_date.get(date_str)
-            if fallback:
-                dep_time, arr_time = fallback
+        times = schedule_times.get((fn, date_str))
+        if not times:
+            stripped = fn.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+            if stripped:
+                times = schedule_times.get((stripped, date_str))
+        if times:
+            sdep, sarr = times
+            if dep_time is None:
+                dep_time = sdep
+            if arr_time is None:
+                arr_time = sarr
+
     return FareOut(
         departure_date=f.departure_date,
         price=f.price,
@@ -155,29 +158,13 @@ async def fares_for_route(
         sched_stmt = sched_stmt.where(Schedule.departure_date <= date_to)
     sched_rows = await db.execute(sched_stmt)
     schedule_times: dict[tuple[str, str], tuple[str | None, str | None]] = {}
-    # Per-date list of (departure_time, arrival_time) for the route, sorted
-    # by departure time. Used as a fallback when a fare has no usable flight
-    # number to match against the (flight_number, date) index.
-    sched_by_date_raw: dict[str, list[tuple]] = {}
     for fn, dep_d, dep_t, arr_t in sched_rows.all():
-        if not dep_d:
-            continue
-        dt_str = dep_t.strftime("%H:%M") if dep_t else None
-        at_str = arr_t.strftime("%H:%M") if arr_t else None
-        date_str = str(dep_d)
-        if fn:
-            schedule_times[(fn, date_str)] = (dt_str, at_str)
-        sched_by_date_raw.setdefault(date_str, []).append((dep_t, dt_str, at_str))
+        if fn and dep_d:
+            dt_str = dep_t.strftime("%H:%M") if dep_t else None
+            at_str = arr_t.strftime("%H:%M") if arr_t else None
+            schedule_times[(fn, str(dep_d))] = (dt_str, at_str)
 
-    # Resolve per-date fallback to the earliest scheduled departure.
-    schedule_times_by_date: dict[str, tuple[str | None, str | None]] = {}
-    for date_str, entries in sched_by_date_raw.items():
-        # None departure times go last so a flight with a known time wins.
-        entries.sort(key=lambda x: (x[0] is None, x[0]))
-        _, dt_str, at_str = entries[0]
-        schedule_times_by_date[date_str] = (dt_str, at_str)
-
-    outs = [_fare_to_out(f, rates, schedule_times, schedule_times_by_date) for f in rows]
+    outs = [_fare_to_out(f, rates, schedule_times) for f in rows]
     eur_values = [x.price_eur for x in outs if x.price_eur is not None]
     cheapest = min(eur_values) if eur_values else None
 
