@@ -40,7 +40,10 @@ log = logging.getLogger("scraper")
 
 AIRLINE = "FR"
 DEFAULT_WORKERS = 8
-DEFAULT_MONTHS_AHEAD = 6
+# 3 months ~ 15k jobs at ~110 jobs/min = ~2.3h. Picked so a full pass
+# comfortably fits inside the GitHub Actions workflow's 4h budget while
+# still giving useful forward visibility.
+DEFAULT_MONTHS_AHEAD = 3
 _SENTINEL = None
 
 SERVICES_URL = "https://services-api.ryanair.com"
@@ -161,7 +164,17 @@ def _db_writer(write_q, counters):
                 )
                 try:
                     session.execute(stmt)
-                except Exception:
+                except Exception as exc:
+                    # Log loudly: silently swallowing errors here once
+                    # masked a schema mismatch that caused an entire
+                    # 4-hour scrape pass to commit zero rows.
+                    counters["insert_errors"] += 1
+                    if counters["insert_errors"] <= 5:
+                        log.exception(
+                            "[%s] Insert failed (%s -> %s @ %s): %s",
+                            AIRLINE, row.get("origin"), row.get("destination"),
+                            row.get("departure_date"), exc,
+                        )
                     session.rollback()
 
             counters["total"] += len(rows)
@@ -282,7 +295,7 @@ def scrape_fares(session, airports=None, limit=None,
     write_q = queue.Queue(maxsize=200)
     counters_lock = threading.Lock()
     counters = {
-        "done": 0, "total": 0,
+        "done": 0, "total": 0, "insert_errors": 0,
         "jobs": len(jobs), "t0": _time.monotonic(),
     }
 
@@ -311,6 +324,6 @@ def scrape_fares(session, airports=None, limit=None,
 
     elapsed = _time.monotonic() - counters["t0"]
     log.info(
-        "[%s] Done in %.1fm: %d fare entries stored.",
-        AIRLINE, elapsed / 60, counters["total"],
+        "[%s] Done in %.1fm: %d fare entries stored (%d insert errors).",
+        AIRLINE, elapsed / 60, counters["total"], counters["insert_errors"],
     )

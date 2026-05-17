@@ -52,8 +52,12 @@ jobs:
             docker stop scraper_fr scraper_w6 2>/dev/null || true
             docker rm scraper_fr scraper_w6 2>/dev/null || true
 
-            echo "==> Building backend + scraper..."
-            docker compose --profile scraper build backend scraper
+            echo "==> Building backend + scraper + migrate..."
+            # IMPORTANT: include `migrate` in the build set. Otherwise the
+            # migrate image keeps its old packages/db layer and skips any
+            # new migration files added in this commit -- which silently
+            # leaves the DB schema behind.
+            docker compose --profile migrate --profile scraper build backend scraper migrate
 
             echo "==> Starting database..."
             docker compose up -d db

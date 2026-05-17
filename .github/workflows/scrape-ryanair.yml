@@ -9,7 +9,7 @@ jobs:
   scrape:
     name: Run Ryanair scraper
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
 
     steps:
       - name: Run scraper on server
@@ -18,7 +18,7 @@ jobs:
           host: ${{ secrets.DO_HOST }}
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
-          command_timeout: 120m
+          command_timeout: 240m
           script: |
             set -e
             cd ~/mossina-dev
