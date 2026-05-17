@@ -88,6 +88,15 @@ def run_scrape(args, log):
 
     Returns True if data was scraped successfully, False otherwise.
     """
+    # Wall-clock reference for the freshness check at the end. Used
+    # instead of `now() - interval '2 hours'` because the schedules
+    # phase (~60min) plus the fares phase (~60min) can leave the
+    # earliest-inserted `scraped_at` value just outside any fixed
+    # interval -- producing a false-negative FAILED notification even
+    # though every fare was written successfully.
+    from datetime import datetime, timezone
+    pass_start = datetime.now(timezone.utc)
+
     session = SessionLocal()
     success = False
     try:
@@ -133,8 +142,11 @@ def run_scrape(args, log):
             snapshot_routes(session, code, log)
 
             fare_count = session.execute(
-                text("SELECT COUNT(*) FROM fares WHERE airline = :a AND scraped_at > now() - interval '2 hours'"),
-                {"a": code},
+                text(
+                    "SELECT COUNT(*) FROM fares "
+                    "WHERE airline = :a AND scraped_at >= :pass_start"
+                ),
+                {"a": code, "pass_start": pass_start},
             ).scalar() or 0
 
             if fare_count == 0:

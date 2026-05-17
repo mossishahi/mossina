@@ -427,7 +427,9 @@ async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResp
             dfs_path(nxt, next_nodes, next_edges, visited, depth_limit)
             visited.remove(nxt)
 
-    for depth in range(1, request.max_hops + 1):
+    # max_stops counts cities visited; convert to edge count for DFS.
+    max_edges = max(1, request.max_stops - 1)
+    for depth in range(1, max_edges + 1):
         if over_budget():
             break
         for origin in sorted(origins_set):
@@ -533,7 +535,11 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
             dfs_cycle(start, nxt, next_nodes, next_edges, visited, depth_limit)
             visited.remove(nxt)
 
-    for depth in range(2, request.max_hops + 1):
+    # For cycles, max_stops includes both endpoints (which are the same
+    # city), so a cycle visiting 3 distinct cities (A->B->C->A) has
+    # max_stops=4 but exactly 3 edges. Edge count = max_stops - 1.
+    max_edges = max(2, request.max_stops - 1)
+    for depth in range(2, max_edges + 1):
         if over_budget():
             break
         for start in sorted(origins_set):

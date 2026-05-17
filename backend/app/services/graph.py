@@ -6,7 +6,12 @@ from datetime import date
 from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mossina_db.models import Fare, Route
+from mossina_db.models import AirportDistance, Fare, Route
+
+# Sentinel "airline" code for ground-transfer edges. Distinct from any
+# real IATA carrier code so the existing airline-keyed UI can treat it
+# specially without colliding.
+GROUND_AIRLINE = "GROUND"
 
 
 def _normalize_date_range(
@@ -66,3 +71,22 @@ async def build_adjacency(
     for o, d, _ in edges:
         by_origin[o].add(d)
     return {o: sorted(by_origin[o]) for o in sorted(by_origin.keys())}
+
+
+async def fetch_ground_edges(
+    db: AsyncSession,
+    max_km: float | None,
+) -> list[tuple[str, str, float]]:
+    """Return (a, b, distance_km) ground-transfer edges within max_km.
+
+    Undirected: the caller is expected to expand each pair into both
+    directions in adjacency. Returns an empty list when max_km is None
+    or 0 -- the natural "ground transfers disabled" case.
+    """
+    if not max_km or max_km <= 0:
+        return []
+    stmt = select(
+        AirportDistance.a, AirportDistance.b, AirportDistance.distance_km,
+    ).where(AirportDistance.distance_km <= float(max_km))
+    result = await db.execute(stmt)
+    return [(row[0], row[1], float(row[2])) for row in result.all()]
