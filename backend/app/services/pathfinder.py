@@ -397,30 +397,34 @@ def _build_adjacency(
 
 async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResponse:
     t_start = time.perf_counter()
-    edges = await fetch_filtered_route_edges(
+    flight_edges = await fetch_filtered_route_edges(
         db, request.airline, request.date_from, request.date_to
     )
+    ground_edges = await fetch_ground_edges(db, request.ground_distance_km)
     rates = await get_rates(db)
-    leg_keys = {(o, d, a) for o, d, a in edges}
+    flight_leg_keys = {(o, d, a) for o, d, a in flight_edges}
     leg_fares = await _load_leg_fares_by_date(
-        db, leg_keys, request.date_from, request.date_to, rates
+        db, flight_leg_keys, request.date_from, request.date_to, rates
     )
 
     all_nodes: set[str] = set()
-    for o, d, _ in edges:
+    for o, d, _ in flight_edges:
         all_nodes.add(o)
         all_nodes.add(d)
+    for a, b, _ in ground_edges:
+        all_nodes.add(a)
+        all_nodes.add(b)
 
     dest_set = set(request.destinations) if request.destinations is not None else all_nodes
     origins_set = set(request.origins)
     allowed_intermediate = origins_set | dest_set
 
-    adj = _build_adjacency_with_airlines(edges)
+    adj = _build_adjacency(flight_edges, ground_edges)
 
     results: list[PathResult] = []
     node_visits = 0
     timed_out = False
-    found_at_depth: set[tuple[str, ...]] = set()
+    found_at_depth: set[tuple] = set()
 
     def over_budget() -> bool:
         nonlocal timed_out
@@ -438,7 +442,7 @@ async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResp
     def dfs_path(
         current: str,
         path_nodes: list[str],
-        path_edges: list[tuple[str, str, str]],
+        path_edges: list[EdgeRec],
         visited: set[str],
         depth_limit: int,
     ) -> None:
@@ -448,23 +452,42 @@ async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResp
             return
         if current in dest_set and len(path_edges) >= 1:
             if len(path_edges) == depth_limit:
-                sig = tuple(path_nodes)
-                if sig not in found_at_depth:
-                    last_hop_idx = len(path_nodes) - 1
-                    if _hop_ok(current, last_hop_idx, hop_filters):
-                        interiors_ok = (not request.only_selected) or all(
-                            x in allowed_intermediate for x in path_nodes[1:-1]
-                        )
-                        if interiors_ok:
-                            found_at_depth.add(sig)
-                            results.append(_build_path_result(path_nodes, path_edges, leg_fares, hop_filters))
+                # Reject all-ground paths: a "flight search website" result
+                # has to contain at least one flight.
+                has_flight = any(e[3] == "flight" for e in path_edges)
+                if has_flight:
+                    # Dedup over (path_nodes, edge-kind signature) so a
+                    # flight-only path and a ground-mixed path over the
+                    # same airport sequence both survive.
+                    sig = (tuple(path_nodes), tuple(e[3] for e in path_edges))
+                    if sig not in found_at_depth:
+                        last_hop_idx = len(path_nodes) - 1
+                        if _hop_ok(current, last_hop_idx, hop_filters):
+                            interiors_ok = (not request.only_selected) or all(
+                                x in allowed_intermediate for x in path_nodes[1:-1]
+                            )
+                            if interiors_ok:
+                                found_at_depth.add(sig)
+                                results.append(_build_path_result(
+                                    path_nodes, path_edges, leg_fares, hop_filters,
+                                ))
         if len(path_edges) >= depth_limit:
             return
         leg_idx = len(path_edges)
-        for nxt, airline in adj.get(current, []):
+        prev_was_ground = bool(path_edges) and path_edges[-1][3] == "ground"
+        for nxt, airline, kind, ground_km in adj.get(current, []):
             if over_budget():
                 return
             if nxt in visited:
+                continue
+            # No two consecutive ground transfers (a longer single ground
+            # transfer would just be a direct edge if it existed).
+            if kind == "ground" and prev_was_ground:
+                continue
+            # Ground transfers are meaningless for 1-edge paths (the user
+            # was explicit: A->B can't be a ground transfer on a flight
+            # search website).
+            if kind == "ground" and depth_limit == 1:
                 continue
             if not _leg_ok(airline, leg_idx, leg_filters):
                 continue
@@ -476,7 +499,7 @@ async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResp
                 interiors = next_nodes[1:-1]
                 if not all(x in allowed_intermediate for x in interiors):
                     continue
-            next_edges = path_edges + [(current, nxt, airline)]
+            next_edges = path_edges + [(current, nxt, airline, kind, ground_km)]
             visited.add(nxt)
             dfs_path(nxt, next_nodes, next_edges, visited, depth_limit)
             visited.remove(nxt)
@@ -507,21 +530,22 @@ async def find_paths(db: AsyncSession, request: PathSearchRequest) -> SearchResp
 
 async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchResponse:
     t_start = time.perf_counter()
-    edges = await fetch_filtered_route_edges(
+    flight_edges = await fetch_filtered_route_edges(
         db, None, request.date_from, request.date_to
     )
+    ground_edges = await fetch_ground_edges(db, request.ground_distance_km)
     rates = await get_rates(db)
-    leg_keys = {(o, d, a) for o, d, a in edges}
+    flight_leg_keys = {(o, d, a) for o, d, a in flight_edges}
     leg_fares = await _load_leg_fares_by_date(
-        db, leg_keys, request.date_from, request.date_to, rates
+        db, flight_leg_keys, request.date_from, request.date_to, rates
     )
 
     origins_set = set(request.origins)
     allowed_intermediate = origins_set
 
-    adj = _build_adjacency_with_airlines(edges)
+    adj = _build_adjacency(flight_edges, ground_edges)
 
-    seen_cycle_keys: set[tuple[str, ...]] = set()
+    seen_cycle_keys: set = set()
     results: list[PathResult] = []
     node_visits = 0
     timed_out = False
@@ -543,7 +567,7 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
         start: str,
         current: str,
         path_nodes: list[str],
-        path_edges: list[tuple[str, str, str]],
+        path_edges: list[EdgeRec],
         visited: set[str],
         depth_limit: int,
     ) -> None:
@@ -552,9 +576,16 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
         if over_budget():
             return
         leg_idx = len(path_edges)
-        for nxt, airline in adj.get(current, []):
+        prev_was_ground = bool(path_edges) and path_edges[-1][3] == "ground"
+        for nxt, airline, kind, ground_km in adj.get(current, []):
             if over_budget():
                 return
+            if kind == "ground" and prev_was_ground:
+                continue
+            # Same "no ground for 1-edge paths" rule; cycles need at least
+            # 2 edges anyway so depth_limit is never < 2, but be explicit.
+            if kind == "ground" and depth_limit == 1:
+                continue
             if not _leg_ok(airline, leg_idx, leg_filters):
                 continue
             if nxt == start and len(path_edges) >= 1:
@@ -562,15 +593,17 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
                 if total_edges != depth_limit:
                     continue
                 full_nodes = path_nodes + [start]
+                full_edges = path_edges + [(current, nxt, airline, kind, ground_km)]
+                if not any(e[3] == "flight" for e in full_edges):
+                    continue
                 if request.only_selected:
                     interiors = full_nodes[1:-1]
                     if not all(x in allowed_intermediate for x in interiors):
                         continue
-                key = _cycle_dedup_key(full_nodes)
+                key = _cycle_dedup_key(full_nodes, full_edges)
                 if key in seen_cycle_keys:
                     continue
                 seen_cycle_keys.add(key)
-                full_edges = path_edges + [(current, nxt, airline)]
                 results.append(_build_path_result(full_nodes, full_edges, leg_fares, hop_filters))
                 continue
             if nxt in visited:
@@ -584,14 +617,14 @@ async def find_cycles(db: AsyncSession, request: CycleSearchRequest) -> SearchRe
                 if nxt not in allowed_intermediate:
                     continue
             next_nodes = path_nodes + [nxt]
-            next_edges = path_edges + [(current, nxt, airline)]
+            next_edges = path_edges + [(current, nxt, airline, kind, ground_km)]
             visited.add(nxt)
             dfs_cycle(start, nxt, next_nodes, next_edges, visited, depth_limit)
             visited.remove(nxt)
 
     # For cycles, max_stops includes both endpoints (which are the same
-    # city), so a cycle visiting 3 distinct cities (A->B->C->A) has
-    # max_stops=4 but exactly 3 edges. Edge count = max_stops - 1.
+    # city). A cycle visiting 3 distinct cities (A->B->C->A) has 4 stops
+    # but exactly 3 edges. Edge count = max_stops - 1.
     max_edges = max(2, request.max_stops - 1)
     for depth in range(2, max_edges + 1):
         if over_budget():
