@@ -2,8 +2,8 @@ import { Loader2, Search, Compass } from "lucide-react";
 import { useMapStore } from "@/stores/mapStore";
 
 interface Props {
-  maxHops: number;
-  setMaxHops: (v: number) => void;
+  maxStops: number;
+  setMaxStops: (v: number) => void;
   onSearch: () => void;
   pathPending: boolean;
   cyclePending: boolean;
@@ -12,7 +12,7 @@ interface Props {
 }
 
 export default function SearchControls({
-  maxHops, setMaxHops, onSearch,
+  maxStops, setMaxStops, onSearch,
   pathPending, cyclePending,
 }: Props) {
   const selectedCities = useMapStore((s) => s.selectedCities);
@@ -26,13 +26,13 @@ export default function SearchControls({
       </div>
 
       <div className="flex items-center gap-2 px-3 pb-2.5">
-        <span className="text-[11px] text-[#8b949e] shrink-0">Max hops</span>
+        <span className="text-[11px] text-[#8b949e] shrink-0">Max stops</span>
         <input
           type="number"
-          min={1}
+          min={2}
           max={10}
-          value={maxHops}
-          onChange={(e) => setMaxHops(Number(e.target.value))}
+          value={maxStops}
+          onChange={(e) => setMaxStops(Number(e.target.value))}
           className="w-12 bg-[#0d1117] border border-[#30363d] rounded-md py-1 px-1.5 text-xs text-[#c9d1d9] text-center focus:outline-none focus:border-[#58a6ff] transition-colors"
         />
         <button

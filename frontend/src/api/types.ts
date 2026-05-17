@@ -41,12 +41,19 @@ export interface RouteFares {
   fares: Fare[];
 }
 
+export type LegKind = "flight" | "ground";
+
 export interface PathLeg {
   origin: string;
   destination: string;
+  // For flights: IATA airline code. For ground: "GROUND" sentinel.
   airline: string;
+  // Defaults to "flight" when the backend response predates the field.
+  kind?: LegKind;
   cost_eur: number | null;
   best_date: string | null;
+  // Populated only when kind === "ground".
+  ground_distance_km?: number | null;
 }
 
 export interface PathResult {
@@ -83,23 +90,28 @@ export interface LegConstraint {
 export interface PathSearchRequest {
   origins: string[];
   destinations: string[];
-  max_hops: number;
+  // Max cities visited (origin + intermediates + destination). A ground
+  // transfer to a new city also consumes a stop slot.
+  max_stops: number;
   date_from: string;
   date_to: string;
   only_selected?: boolean;
   airline?: string;
   hop_filters?: HopConstraint[] | null;
   leg_filters?: LegConstraint[] | null;
+  // Max ground-transfer distance in km. Omit / null / 0 = no transfers.
+  ground_distance_km?: number | null;
 }
 
 export interface CycleSearchRequest {
   origins: string[];
-  max_hops: number;
+  max_stops: number;
   date_from: string;
   date_to: string;
   only_selected?: boolean;
   hop_filters?: HopConstraint[] | null;
   leg_filters?: LegConstraint[] | null;
+  ground_distance_km?: number | null;
 }
 
 export interface ExchangeRate {

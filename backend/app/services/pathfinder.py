@@ -20,7 +20,13 @@ from app.schemas.search import (
     SearchResponse,
 )
 from app.services.exchange_rates import convert_to_eur, get_rates
-from app.services.graph import fetch_filtered_route_edges
+from app.services.graph import GROUND_AIRLINE, fetch_filtered_route_edges, fetch_ground_edges
+
+# An internal record for one edge in a candidate path. `airline` is the
+# IATA code for flights, or GROUND_AIRLINE for ground transfers; `kind`
+# disambiguates; `ground_km` is set only when kind == "ground".
+EdgeRec = tuple[str, str, str, str, float | None]  # (origin, dest, airline, kind, ground_km)
+AdjEntry = tuple[str, str, str, float | None]      # (dest, airline, kind, ground_km)
 
 AIRLINE_META = {
     "FR": {"name": "Ryanair", "color": "#0b4ea2"},
@@ -49,40 +55,77 @@ def _sort_key_cost(result: PathResult) -> tuple[int, float]:
     return (0, result.total_cost_eur)
 
 
-def _cycle_dedup_key(airports: list[str]) -> tuple[str, ...]:
-    """Normalize cycle by sorting unique airports (drop duplicate closing node)."""
+def _cycle_dedup_key(
+    airports: list[str], edges: list[EdgeRec],
+) -> tuple:
+    """Normalize cycle key, distinguishing different leg-kind compositions.
+
+    Without the kind signature, an all-flight cycle and a mixed flight+
+    ground cycle over the same airport set would collapse into one entry
+    (the cheaper one — usually the one with ground transfers — would
+    silently shadow the pure-flight option).
+    """
     if len(airports) < 2:
-        return tuple(airports)
-    if airports[0] == airports[-1]:
-        core = airports[:-1]
-    else:
-        core = airports
-    return tuple(sorted(core))
+        return (tuple(airports),)
+    core = airports[:-1] if airports[0] == airports[-1] else airports
+    # Sorting kinds means "two ground + one flight" cycles compare equal
+    # regardless of which slot the flight occupies. Tighten this later if
+    # users want distinct routings preserved.
+    kind_sig = tuple(sorted(e[3] for e in edges))
+    return (tuple(sorted(core)), kind_sig)
 
 
 def _build_path_result(
     airports: list[str],
-    edges: list[tuple[str, str, str]],
+    edges: list[EdgeRec],
     leg_fares: dict[tuple[str, str], list[tuple[date, float]]],
     hop_filters: list[HopConstraint] | None = None,
 ) -> PathResult:
+    # Pricing only considers flight legs. Ground transfers contribute zero
+    # cost and don't impose their own date constraint -- stay rules apply
+    # between consecutive flights, "across" any ground transfers in between.
+    flight_indices: list[int] = [
+        i for i, e in enumerate(edges) if e[3] == "flight"
+    ]
+    flight_edges_for_pricing: list[tuple[str, str, str]] = [
+        (edges[i][0], edges[i][1], edges[i][2]) for i in flight_indices
+    ]
+
+    # Stay-days hop filters were authored against the full stop list, but
+    # pricing now sees only flight legs. Map each flight's "gap to next
+    # flight" to the user-specified stay for the stop AFTER this flight
+    # in the original full path. This is approximate when ground legs sit
+    # in between but matches the user's intuition for the common case.
     stay_days_per_hop = None
     if hop_filters:
         stay_days_per_hop = []
-        for i in range(len(edges)):
-            hop_idx = i + 1
+        for k, edge_idx in enumerate(flight_indices):
+            hop_idx = edge_idx + 1  # stop index of this flight's destination
             hf = hop_filters[hop_idx] if hop_idx < len(hop_filters) else None
             min_d = hf.min_stay_days if hf and hf.min_stay_days is not None else 1
             max_d = hf.max_stay_days if hf and hf.max_stay_days is not None else None
             stay_days_per_hop.append((min_d, max_d))
-    total, partial, per_leg = _sequential_best_cost(edges, leg_fares, stay_days_per_hop=stay_days_per_hop)
+
+    total, partial, flight_per_leg = _sequential_best_cost(
+        flight_edges_for_pricing, leg_fares, stay_days_per_hop=stay_days_per_hop,
+    )
+    flight_results = dict(zip(flight_indices, flight_per_leg))
+
     legs: list[PathLeg] = []
-    for i, (o, d, airline) in enumerate(edges):
-        cost, best_date = per_leg[i]
-        legs.append(PathLeg(
-            origin=o, destination=d, airline=airline,
-            cost_eur=cost, best_date=best_date,
-        ))
+    for i, (o, d, airline, kind, ground_km) in enumerate(edges):
+        if kind == "ground":
+            legs.append(PathLeg(
+                origin=o, destination=d, airline=airline, kind="ground",
+                cost_eur=0.0, best_date=None,
+                ground_distance_km=ground_km,
+            ))
+        else:
+            cost, best_date = flight_results.get(i, (None, None))
+            legs.append(PathLeg(
+                origin=o, destination=d, airline=airline, kind="flight",
+                cost_eur=cost, best_date=best_date,
+            ))
+
     return PathResult(
         path=airports,
         legs=legs,
@@ -330,14 +373,25 @@ def _leg_ok(airline: str, leg_idx: int, leg_filters: list[LegConstraint] | None)
     return True
 
 
-def _build_adjacency_with_airlines(
-    edges: list[tuple[str, str, str]],
-) -> dict[str, list[tuple[str, str]]]:
-    adj: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for o, d, a in edges:
-        adj[o].append((d, a))
+def _build_adjacency(
+    flight_edges: list[tuple[str, str, str]],
+    ground_edges: list[tuple[str, str, float]],
+) -> dict[str, list[AdjEntry]]:
+    """Combined flight + ground adjacency.
+
+    Each entry is (dest, airline_or_GROUND, kind, ground_km_or_None).
+    Ground edges are stored from the database as undirected (a < b) and
+    expanded here into both directions.
+    """
+    adj: dict[str, list[AdjEntry]] = defaultdict(list)
+    for o, d, a in flight_edges:
+        adj[o].append((d, a, "flight", None))
+    for a, b, km in ground_edges:
+        adj[a].append((b, GROUND_AIRLINE, "ground", km))
+        adj[b].append((a, GROUND_AIRLINE, "ground", km))
     for o in adj:
-        adj[o].sort(key=lambda t: (t[0], t[1]))
+        # Sort: flights before ground at each node, then by destination, then airline.
+        adj[o].sort(key=lambda t: (t[2] == "ground", t[0], t[1]))
     return adj
 
 

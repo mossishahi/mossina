@@ -104,7 +104,9 @@ function hopsHaveDayConstraints(hops: HopFilterValue[]): boolean {
 // ----- Pathfinder ------------------------------------------------------
 
 export default function Pathfinder() {
-  const [maxHops, setMaxHops] = useState(3);
+  // Max cities visited (origin + intermediates + destination). Default 4
+  // matches the previous behaviour of max_hops=3 (3 edges = 4 stops).
+  const [maxStops, setMaxStops] = useState(4);
   const [groupFilters, setGroupFilters] = useState<Record<number, GroupFilters>>({});
   const [openGroups, setOpenGroups] = useState<Set<number>>(new Set());
   const selectedCities = useMapStore((s) => s.selectedCities);
@@ -159,7 +161,7 @@ export default function Pathfinder() {
     pathMutation.mutate({
       origins: cities,
       destinations: cities,
-      max_hops: maxHops,
+      max_stops: maxStops,
       date_from: from,
       date_to: to,
       only_selected: false,
@@ -168,7 +170,7 @@ export default function Pathfinder() {
 
     cycleMutation.mutate({
       origins: cities,
-      max_hops: maxHops,
+      max_stops: maxStops,
       date_from: from,
       date_to: to,
       only_selected: false,
@@ -284,7 +286,7 @@ export default function Pathfinder() {
         {
           origins: s.cities,
           destinations: s.cities,
-          max_hops: maxHops,
+          max_stops: maxStops,
           date_from: s.from,
           date_to: s.to,
           only_selected: false,
@@ -300,7 +302,7 @@ export default function Pathfinder() {
       cycleMutation.mutate(
         {
           origins: s.cities,
-          max_hops: maxHops,
+          max_stops: maxStops,
           date_from: s.from,
           date_to: s.to,
           only_selected: false,
@@ -314,14 +316,14 @@ export default function Pathfinder() {
         },
       );
     },
-    [maxHops],
+    [maxStops],
   );
 
   return (
     <>
       <SearchControls
-        maxHops={maxHops}
-        setMaxHops={setMaxHops}
+        maxStops={maxStops}
+        setMaxStops={setMaxStops}
         onSearch={handleSearch}
         pathPending={pathMutation.isPending}
         cyclePending={cycleMutation.isPending}
