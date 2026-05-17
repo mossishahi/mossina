@@ -259,14 +259,16 @@ def _worker(worker_id, my_pairs, windows, scraped_at, write_q,
 
 
 def scrape_schedules(session, limit=None, days_fresh=DEFAULT_FRESH_DAYS,
-                     num_windows=4, workers=DEFAULT_WORKERS,
+                     num_windows=1, workers=DEFAULT_WORKERS,
                      on_progress=None, stop_event=None, **_kw):
     """Fetch timetable data for Wizzair routes using parallel sessions.
 
     Args:
         limit:      max route-pairs to scrape (None = all stale)
         days_fresh: skip routes scraped within this many days (0 = force all)
-        num_windows: number of 42-day windows to cover (4 ~ 168 days)
+        num_windows: number of 42-day windows to cover (default 1 ~ 42 days,
+                    matched roughly to the Ryanair 1-month-ahead config so
+                    a full pass stays under the workflow timeout)
         workers:    number of parallel sessions (default 2)
     """
     if days_fresh > 0:

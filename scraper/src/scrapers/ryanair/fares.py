@@ -40,10 +40,11 @@ log = logging.getLogger("scraper")
 
 AIRLINE = "FR"
 DEFAULT_WORKERS = 8
-# 3 months ~ 15k jobs at ~110 jobs/min = ~2.3h. Picked so a full pass
-# comfortably fits inside the GitHub Actions workflow's 4h budget while
-# still giving useful forward visibility.
-DEFAULT_MONTHS_AHEAD = 3
+# 1 month ~ 5k jobs at ~110 jobs/min = ~45min. Trades long-tail forward
+# visibility for a fast nightly cycle so prices stay fresh; uncommon
+# trips >1 month out fall back to the API directly when a user actually
+# searches them.
+DEFAULT_MONTHS_AHEAD = 1
 _SENTINEL = None
 
 SERVICES_URL = "https://services-api.ryanair.com"
