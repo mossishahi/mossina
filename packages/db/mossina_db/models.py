@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -27,6 +28,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column, relationship
 
 Base = declarative_base()
+
+# Upper bound on the precomputed ground-distance graph. Any airport pair
+# farther than this is NOT stored in airport_distances. The runtime ground
+# slider in the UI must be <= this value -- otherwise we'd be returning
+# results from an incomplete graph.
+MAX_GROUND_DISTANCE_KM = 200
 
 
 class Country(Base):
@@ -204,3 +211,31 @@ class ExchangeRate(Base):
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )
+
+
+class AirportDistance(Base):
+    """Precomputed great-circle distances between nearby airport pairs.
+
+    Stored undirected with canonical ordering (a < b) so each pair occupies
+    exactly one row. Only pairs within MAX_GROUND_DISTANCE_KM are stored
+    -- the table is the "ground graph" for multi-modal routing.
+
+    Populated by scripts/compute_airport_distances.py, refreshed by the
+    scraper after airports change.
+    """
+    __tablename__ = "airport_distances"
+    __table_args__ = (
+        CheckConstraint("a < b", name="ck_airport_distances_canonical_order"),
+        Index("ix_airport_distances_a_dist", "a", "distance_km"),
+        Index("ix_airport_distances_b_dist", "b", "distance_km"),
+    )
+
+    a: Mapped[str] = mapped_column(
+        String(3), ForeignKey("airports.iata_code", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    b: Mapped[str] = mapped_column(
+        String(3), ForeignKey("airports.iata_code", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    distance_km: Mapped[float] = mapped_column(Float, nullable=False)

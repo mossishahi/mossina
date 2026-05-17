@@ -15,6 +15,8 @@ import time
 
 from sqlalchemy import text
 
+from mossina_db.distances import recompute_airport_distances
+
 from src.config import setup_logging
 from src.database import SessionLocal
 from src.scrapers import get_airline, list_airlines
@@ -140,6 +142,16 @@ def run_scrape(args, log):
             else:
                 log.info("[%s] Verified: %d fresh fares in database.", code, fare_count)
                 success = True
+
+        # New airports may have been added by either scraper, so recompute
+        # the ground-distance graph once per pass (after all airlines).
+        # Cheap (~40k Haversine ops at ~285 airports) and idempotent.
+        if success:
+            try:
+                log.info("Recomputing airport distance graph ...")
+                recompute_airport_distances(session)
+            except Exception:
+                log.exception("Failed to recompute airport_distances (non-fatal)")
 
     except Exception:
         log.exception("Scrape pass failed")
