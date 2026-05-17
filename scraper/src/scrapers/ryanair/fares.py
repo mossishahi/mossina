@@ -40,11 +40,12 @@ log = logging.getLogger("scraper")
 
 AIRLINE = "FR"
 DEFAULT_WORKERS = 8
-# 1 month ~ 5k jobs at ~110 jobs/min = ~45min. Trades long-tail forward
-# visibility for a fast nightly cycle so prices stay fresh; uncommon
-# trips >1 month out fall back to the API directly when a user actually
-# searches them.
-DEFAULT_MONTHS_AHEAD = 1
+# 2 calendar months = current + next. Gives ~30-45 forward days
+# regardless of the day-of-month the scrape runs on (vs. 1 month, which
+# is just the remainder of the current month -- as little as 1 day if
+# the scrape runs on the 30th). ~10k jobs at ~110 jobs/min = ~90 min,
+# comfortably inside the workflow's 4h budget.
+DEFAULT_MONTHS_AHEAD = 2
 _SENTINEL = None
 
 SERVICES_URL = "https://services-api.ryanair.com"
