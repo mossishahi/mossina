@@ -1,6 +1,7 @@
 import AirlineFilter from "./AirlineFilter";
 import CountryTree from "./CountryTree";
 import TimeFrame from "./TimeFrame";
+import GroundDistance from "./GroundDistance";
 import { useMapStore } from "@/stores/mapStore";
 import { useRoutes } from "@/hooks/useRoutes";
 
@@ -27,6 +28,7 @@ export default function Sidebar() {
         </div>
         <AirlineFilter />
         <TimeFrame />
+        <GroundDistance />
       </div>
 
       <div className="p-3 max-h-[50vh] overflow-y-auto">

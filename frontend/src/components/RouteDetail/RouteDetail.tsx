@@ -201,11 +201,13 @@ function SegmentDrawer({
   const open = forceOpen;
   const { dateFrom, dateTo } = useFilterStore();
   const selectSegmentDate = usePathStore((s) => s.selectSegmentDate);
+  const isGround = leg.kind === "ground";
   const meta = AIRLINE_META[leg.airline];
-  const color = meta?.color || "#8b949e";
+  const color = isGround ? "#8b949e" : meta?.color || "#8b949e";
 
   const effectiveDateFrom = minDate || dateFrom || undefined;
 
+  // Ground transfers have no fares -- skip the fetch entirely.
   const { data, isLoading } = useQuery({
     queryKey: ["fares", leg.origin, leg.destination, effectiveDateFrom, dateTo],
     queryFn: () =>
@@ -213,7 +215,7 @@ function SegmentDrawer({
         date_from: effectiveDateFrom,
         date_to: dateTo || undefined,
       }),
-    enabled: open,
+    enabled: open && !isGround,
     staleTime: 60_000,
   });
 
@@ -227,11 +229,15 @@ function SegmentDrawer({
     }
   }
 
-  const costDisplay = selection
-    ? `${selection.price_eur.toFixed(2)}\u20AC`
-    : leg.cost_eur != null
-      ? `~${leg.cost_eur.toFixed(2)}\u20AC`
-      : "--";
+  // Ground transfers don't show a price -- they're free at the API level
+  // and the user explicitly asked not to surface a cost.
+  const costDisplay = isGround
+    ? `~${Math.round(leg.ground_distance_km ?? 0)} km`
+    : selection
+      ? `${selection.price_eur.toFixed(2)}\u20AC`
+      : leg.cost_eur != null
+        ? `~${leg.cost_eur.toFixed(2)}\u20AC`
+        : "--";
 
   return (
     <div className={index > 0 ? "border-t border-[#21262d]" : ""}>
@@ -257,14 +263,22 @@ function SegmentDrawer({
           </span>
         )}
         <span className="text-[10px] font-medium" style={{ color }}>
-          {meta?.name || leg.airline}
+          {isGround ? "Ground" : meta?.name || leg.airline}
         </span>
         <span className={`text-[10px] font-semibold tabular-nums ${selection ? "text-[#3fb950]" : "text-[#8b949e]"}`}>
           {costDisplay}
         </span>
       </button>
 
-      {open && (
+      {open && isGround && (
+        <div className="px-3 pb-2">
+          <p className="text-[10px] text-[#484f58] py-1">
+            Ground transfer between airports (~{Math.round(leg.ground_distance_km ?? 0)} km).
+            No flight booking required for this segment.
+          </p>
+        </div>
+      )}
+      {open && !isGround && (
         <div className="px-3 pb-2">
           {index > 0 && minDate && (
             <p className="text-[9px] text-[#484f58] mb-1">

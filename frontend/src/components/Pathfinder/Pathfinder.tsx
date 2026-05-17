@@ -112,6 +112,7 @@ export default function Pathfinder() {
   const selectedCities = useMapStore((s) => s.selectedCities);
   const activeAirlines = useMapStore((s) => s.activeAirlines);
   const { dateFrom, dateTo } = useFilterStore();
+  const groundDistanceKm = useFilterStore((s) => s.groundDistanceKm);
 
   const { data: airports = [] } = useAirports();
   const nameMap = useMemo(() => {
@@ -166,6 +167,7 @@ export default function Pathfinder() {
       date_to: to,
       only_selected: false,
       airline: al,
+      ground_distance_km: groundDistanceKm > 0 ? groundDistanceKm : null,
     });
 
     cycleMutation.mutate({
@@ -174,6 +176,7 @@ export default function Pathfinder() {
       date_from: from,
       date_to: to,
       only_selected: false,
+      ground_distance_km: groundDistanceKm > 0 ? groundDistanceKm : null,
     });
   }
 
@@ -282,6 +285,7 @@ export default function Pathfinder() {
         exclude_cities: h.excludeCities.length > 0 ? h.excludeCities : null,
       }));
       setRepricing(true);
+      const gdkm = groundDistanceKm > 0 ? groundDistanceKm : null;
       pathMutation.mutate(
         {
           origins: s.cities,
@@ -292,6 +296,7 @@ export default function Pathfinder() {
           only_selected: false,
           airline: s.airline,
           hop_filters: hopConstraints,
+          ground_distance_km: gdkm,
         } as any,
         {
           onSuccess: (data) => {
@@ -307,6 +312,7 @@ export default function Pathfinder() {
           date_to: s.to,
           only_selected: false,
           hop_filters: hopConstraints,
+          ground_distance_km: gdkm,
         } as any,
         {
           onSuccess: (data) => {
@@ -316,7 +322,7 @@ export default function Pathfinder() {
         },
       );
     },
-    [maxStops],
+    [maxStops, groundDistanceKm],
   );
 
   return (
@@ -541,7 +547,15 @@ function PathCard({
 
         {result.path.map((iata, i) => {
           const leg = i < result.legs.length ? result.legs[i] : null;
-          const color = leg ? AIRLINE_META[leg.airline]?.color || "#8b949e" : "#8b949e";
+          const isGround = leg?.kind === "ground";
+          const color = isGround
+            ? "#8b949e"
+            : leg
+              ? AIRLINE_META[leg.airline]?.color || "#8b949e"
+              : "#8b949e";
+          const title = isGround
+            ? `Ground transfer (~${Math.round(leg!.ground_distance_km ?? 0)} km)`
+            : undefined;
           return (
             <span key={i} className="inline-flex items-center gap-0.5">
               <span
@@ -551,9 +565,28 @@ function PathCard({
                 {cityName(iata)}
               </span>
               {i < result.path.length - 1 && (
-                <svg width="20" height="8" viewBox="0 0 20 8" className="shrink-0 mx-0.5" style={{ color }}>
-                  <line x1="0" y1="4" x2="14" y2="4" stroke="currentColor" strokeWidth="1.2" />
-                  <path d="M12 1 L17 4 L12 7" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                <svg
+                  width="20"
+                  height="8"
+                  viewBox="0 0 20 8"
+                  className="shrink-0 mx-0.5"
+                  style={{ color }}
+                  aria-label={title}
+                >
+                  <line
+                    x1="0" y1="4" x2="14" y2="4"
+                    stroke="currentColor"
+                    strokeWidth="1.2"
+                    strokeDasharray={isGround ? "2 2" : undefined}
+                  />
+                  <path
+                    d="M12 1 L17 4 L12 7"
+                    stroke="currentColor"
+                    strokeWidth="1.2"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
                 </svg>
               )}
             </span>

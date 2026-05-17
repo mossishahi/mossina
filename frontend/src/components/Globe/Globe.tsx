@@ -1,7 +1,8 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { DeckGL } from "@deck.gl/react";
-import { ArcLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { ArcLayer, PathLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { PathStyleExtension } from "@deck.gl/extensions";
 import { Map as MapLibreMap } from "react-map-gl/maplibre";
 import { useAirports } from "@/hooks/useAirports";
 import { useMapStore } from "@/stores/mapStore";
@@ -25,6 +26,17 @@ interface ArcDatum {
   isPath: boolean;
   // Vertical arc tilt: deck.gl's getHeight controls how high the arc bows.
   height: number;
+}
+
+// Ground transfers render as flat dashed lines via PathLayer; ArcLayer
+// doesn't support a dashed style so we keep the two kinds in separate
+// layers.
+interface GroundEdgeDatum {
+  path: [[number, number], [number, number]];
+  origin: string;
+  destination: string;
+  distanceKm: number;
+  color: [number, number, number, number];
 }
 
 interface PointDatum {
@@ -135,36 +147,49 @@ export default function Globe({ onArcClick }: Props) {
     [airports, selectedCities],
   );
 
-  const pathArcs = useMemo<ArcDatum[]>(() => {
-    if (selectedPaths.length === 0) return [];
-    const out: ArcDatum[] = [];
+  const { flightArcs, groundEdges } = useMemo(() => {
+    const arcs: ArcDatum[] = [];
+    const grounds: GroundEdgeDatum[] = [];
+    if (selectedPaths.length === 0) return { flightArcs: arcs, groundEdges: grounds };
     selectedPaths.forEach((p) => {
       p.legs.forEach((leg, i) => {
         const o = airportMap.get(leg.origin);
         const d = airportMap.get(leg.destination);
         if (!o || !d) return;
-        const meta = AIRLINE_META[leg.airline];
-        out.push({
-          startLat: o.lat,
-          startLng: o.lon,
-          endLat: d.lat,
-          endLng: d.lon,
-          color: hexToRgba(meta?.color || "#58a6ff", 240),
-          airline: leg.airline,
-          origin: leg.origin,
-          destination: leg.destination,
-          isPath: true,
-          height: 0.6 + i * 0.18,
-        });
+        if (leg.kind === "ground") {
+          grounds.push({
+            path: [[o.lon, o.lat], [d.lon, d.lat]],
+            origin: leg.origin,
+            destination: leg.destination,
+            distanceKm: leg.ground_distance_km ?? 0,
+            // Neutral gray, theme-aware. Slightly translucent so it
+            // reads as "auxiliary" next to the colored flight arcs.
+            color: theme === "dark" ? [180, 190, 200, 220] : [88, 96, 110, 220],
+          });
+        } else {
+          const meta = AIRLINE_META[leg.airline];
+          arcs.push({
+            startLat: o.lat,
+            startLng: o.lon,
+            endLat: d.lat,
+            endLng: d.lon,
+            color: hexToRgba(meta?.color || "#58a6ff", 240),
+            airline: leg.airline,
+            origin: leg.origin,
+            destination: leg.destination,
+            isPath: true,
+            height: 0.6 + i * 0.18,
+          });
+        }
       });
     });
-    return out;
-  }, [selectedPaths, airportMap]);
+    return { flightArcs: arcs, groundEdges: grounds };
+  }, [selectedPaths, airportMap, theme]);
 
   // Arcs are only rendered for an explicit path selection from the result
   // list. Picking cities in the sidebar/tree no longer paints their routes
   // -- the selected city dots themselves indicate activation.
-  const arcs = pathArcs;
+  const arcs = flightArcs;
 
   const handlePointClick = useCallback(
     (info: { object?: PointDatum }) => {
@@ -200,6 +225,21 @@ export default function Globe({ onArcClick }: Props) {
           getSourceColor: theme,
           getTargetColor: theme,
         },
+      }),
+      // Ground transfers as flat dashed lines. PathStyleExtension provides
+      // getDashArray / dashJustified at runtime which the PathLayer's
+      // static types don't expose, hence the cast.
+      new PathLayer<GroundEdgeDatum>({
+        id: "ground-edges",
+        data: groundEdges,
+        getPath: (d) => d.path,
+        getColor: (d) => d.color,
+        getWidth: 2,
+        widthUnits: "pixels",
+        extensions: [new PathStyleExtension({ dash: true })],
+        pickable: false,
+        updateTriggers: { getColor: theme },
+        ...({ getDashArray: [4, 3], dashJustified: true } as any),
       }),
       new ScatterplotLayer<PointDatum>({
         id: "airports",
@@ -239,7 +279,7 @@ export default function Globe({ onArcClick }: Props) {
         },
       }),
     ],
-    [arcs, points, theme, handleArcClick, handlePointClick],
+    [arcs, groundEdges, points, theme, handleArcClick, handlePointClick],
   );
 
   const getTooltip = useCallback((info: any) => {

@@ -190,3 +190,38 @@ body {
   border: none;
   height: 100%;
 }
+
+/* Single-handle ground-distance slider in the sidebar. */
+.ground-slider {
+  background: #21262d;
+}
+.ground-slider::-webkit-slider-runnable-track {
+  height: 3px;
+  background: #21262d;
+  border-radius: 3px;
+}
+.ground-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1.5px solid #58a6ff;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.ground-slider::-moz-range-track {
+  height: 3px;
+  background: #21262d;
+  border-radius: 3px;
+}
+.ground-slider::-moz-range-thumb {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1.5px solid #58a6ff;
+  cursor: pointer;
+}
