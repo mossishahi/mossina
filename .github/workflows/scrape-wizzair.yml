@@ -22,6 +22,8 @@ jobs:
           script: |
             set -e
             cd ~/mossina-dev
+            git pull --ff-only
+            docker compose build scraper
             docker compose run --rm scraper python cli.py --airline W6 -r 0 -w 5
 
       - name: Notify Telegram on failure
