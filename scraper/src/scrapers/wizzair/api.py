@@ -33,12 +33,14 @@ _SCRAPFLY_URL = "https://api.scrapfly.io/scrape"
 # wizzair.com is fronted by an AWS WAF CAPTCHA (x-amzn-waf-action: captcha),
 # so a plain GET from a datacenter IP returns HTTP 405 + a "Human Verification"
 # page instead of the HTML that embeds the versioned API URL. ScrapFly's
-# Anti-Scraping-Protection (asp=true) detects and solves the AWS WAF challenge
-# server-side; render_js lets the SPA hydrate the apiUrl. Solving can take well
-# over 30s, so the homepage discovery uses a generous timeout and a few retries.
+# Anti-Scraping-Protection (asp=true) solves the WAF, but ONLY over residential
+# IPs -- the default datacenter pool still gets served the CAPTCHA page. We only
+# need the homepage once per pass (to read the API version); the be.wizzair.com
+# API endpoints themselves are not WAF-protected and are fetched directly.
 _SCRAPFLY_HOMEPAGE_TIMEOUT = 180
 _SCRAPFLY_HOMEPAGE_ATTEMPTS = 3
 _SCRAPFLY_COUNTRY = "de"
+_SCRAPFLY_PROXY_POOL = "public_residential_pool"
 
 _HEADERS = {
     "User-Agent": (
@@ -162,11 +164,13 @@ def _extract_api_url(html):
     """Pull the versioned API base out of homepage HTML, if present."""
     if not html:
         return None
-    match = re.search(r'"apiUrl"\s*:\s*"([^"]+)"', html)
+    # The homepage config embeds the base unquoted, e.g. apiUrl:"https://...".
+    # Accept optional quotes around the key and single/double quoted values.
+    match = re.search(r'["\']?apiUrl["\']?\s*:\s*["\']([^"\']+)["\']', html)
     if match:
         return match.group(1).replace("\\u002F", "/")
-    # Fallback: the version is also embedded directly in script src / config
-    # as e.g. https://be.wizzair.com/28.3.0/Api
+    # Fallback: the versioned base is also embedded directly in script src /
+    # config as e.g. https://be.wizzair.com/29.3.0/Api
     match = re.search(r'https?:(?:\\u002F|/){2}be\.wizzair\.com(?:\\u002F|/)'
                       r'\d+\.\d+\.\d+(?:\\u002F|/)Api', html)
     if match:
@@ -185,7 +189,7 @@ def _discover_from_homepage():
                     "key": key,
                     "url": _HOMEPAGE_URL,
                     "asp": "true",
-                    "render_js": "true",
+                    "proxy_pool": _SCRAPFLY_PROXY_POOL,
                     "country": _SCRAPFLY_COUNTRY,
                 }, timeout=_SCRAPFLY_HOMEPAGE_TIMEOUT)
                 resp.raise_for_status()
