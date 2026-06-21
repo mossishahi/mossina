@@ -1,0 +1,58 @@
+name: DB Check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Query database stats
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Run DB stats query on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            set -e
+            cd ~/mossina-dev
+            docker compose run --rm -T scraper python - <<'PY'
+            from sqlalchemy import text
+            from src.database import SessionLocal
+
+            s = SessionLocal()
+
+            def scalar(sql, **p):
+                return s.execute(text(sql), p).scalar()
+
+            A = "W6"
+            print("=== DB CHECK (%s) ===" % A)
+            print("airports total           :", scalar("select count(*) from airports"))
+            print("routes (W6)              :", scalar("select count(*) from routes where airline=:a", a=A))
+            print("routes w/ any fares      :", s.execute(text("select count(*) from (select distinct origin,destination from fares where airline=:a) t"), {"a": A}).scalar())
+            print("routes w/ FUTURE fares   :", s.execute(text("select count(*) from (select distinct origin,destination from fares where airline=:a and departure_date>=current_date) t"), {"a": A}).scalar())
+            print("total fares (W6)         :", s.execute(text("select count(*) from fares where airline=:a"), {"a": A}).scalar())
+            print("fares scraped last 60m   :", s.execute(text("select count(*) from fares where airline=:a and scraped_at >= now() - interval '60 minutes'"), {"a": A}).scalar())
+            print("schedules (W6)           :", s.execute(text("select count(*) from schedules where airline=:a"), {"a": A}).scalar())
+            r = s.execute(text("select min(price), round(avg(price)::numeric,2), max(price) from fares where airline=:a and price>0"), {"a": A}).fetchone()
+            print("price min/avg/max        :", tuple(r))
+            r = s.execute(text("select min(departure_date), max(departure_date) from fares where airline=:a"), {"a": A}).fetchone()
+            print("departure date range     :", tuple(r))
+            print("last scrape time         :", s.execute(text("select max(scraped_at) from fares where airline=:a"), {"a": A}).scalar())
+            print("--- routes with NO future fares (sample) ---")
+            for row in s.execute(text("""
+                select r.origin, r.destination from routes r
+                left join (select distinct origin,destination from fares
+                           where airline=:a and departure_date>=current_date) f
+                  on r.origin=f.origin and r.destination=f.destination
+                where r.airline=:a and f.origin is null
+                limit 15
+            """), {"a": A}):
+                print("   ", row[0], "->", row[1])
+            print("currencies:", [tuple(x) for x in s.execute(text("select currency,count(*) from fares where airline=:a group by currency order by 2 desc limit 6"), {"a": A})])
+            s.close()
+            PY
