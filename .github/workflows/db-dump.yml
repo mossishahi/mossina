@@ -1,0 +1,58 @@
+name: DB Dump
+
+on:
+  workflow_dispatch:
+    inputs:
+      format:
+        description: "Dump format"
+        type: choice
+        default: custom
+        options:
+          - custom   # pg_dump -Fc  (restore with pg_restore; compressed)
+          - plain    # pg_dump -Fp  (plain .sql; human-readable)
+
+jobs:
+  dump:
+    name: Dump database and upload artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: pg_dump from server over SSH
+        env:
+          KEY: ${{ secrets.DO_SSH_KEY }}
+          DO_USER: ${{ secrets.DO_USER }}
+          DO_HOST: ${{ secrets.DO_HOST }}
+          FMT: ${{ inputs.format }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$KEY" > key
+          chmod 600 key
+
+          STAMP=$(date -u +%Y%m%d-%H%M%S)
+          if [ "$FMT" = "plain" ]; then
+            DUMP_FLAG="-Fp"
+            OUT="mossina-${STAMP}.sql"
+          else
+            DUMP_FLAG="-Fc"
+            OUT="mossina-${STAMP}.dump"
+          fi
+          echo "Dumping ($FMT) -> $OUT"
+
+          ssh -i key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            "${DO_USER}@${DO_HOST}" \
+            "cd ~/mossina-dev && docker compose exec -T db sh -c 'pg_dump -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" ${DUMP_FLAG}'" \
+            > "$OUT"
+
+          rm -f key
+          ls -lh "$OUT"
+          echo "OUT=$OUT" >> "$GITHUB_ENV"
+
+      - name: Upload dump artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mossina-db-dump
+          path: ${{ env.OUT }}
+          retention-days: 14
