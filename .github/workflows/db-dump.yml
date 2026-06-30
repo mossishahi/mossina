@@ -26,7 +26,9 @@ jobs:
           FMT: ${{ inputs.format }}
         run: |
           set -euo pipefail
-          printf '%s' "$KEY" > key
+          # Write the private key with a guaranteed trailing newline; without it
+          # OpenSSH rejects the key with "error in libcrypto".
+          printf '%s\n' "$KEY" > key
           chmod 600 key
 
           STAMP=$(date -u +%Y%m%d-%H%M%S)
